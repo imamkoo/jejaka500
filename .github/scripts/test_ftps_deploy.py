@@ -1,10 +1,11 @@
 import json
+import sys
 import unittest
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
-from ftps_deploy import deploy, is_excluded, remote_path
+from ftps_deploy import deploy, is_excluded, main, remote_path
 
 
 class FtpsDeploySafetyTests(unittest.TestCase):
@@ -165,6 +166,96 @@ class FtpsDeploySafetyTests(unittest.TestCase):
         self.assertIn("STOR /b.txt", stored)
         self.assertIn("STOR /.manifest.json", stored)
         self.assertNotIn("STOR /a.txt", stored)
+
+    @patch("ftps_deploy.FTP_TLS")
+    def test_deploy_fails_when_manifest_save_fails(self, ftp_factory):
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir)
+            (source / "file.txt").write_text("hello")
+
+            ftp = MagicMock()
+            ftp.size.return_value = None
+
+            def fail_on_manifest(cmd, _buf):
+                if cmd.startswith("STOR /.deploy-manifest"):
+                    from ftplib import error_perm
+                    raise error_perm("550 Permission denied")
+
+            ftp.storbinary.side_effect = fail_on_manifest
+            ftp_factory.return_value.__enter__.return_value = ftp
+
+            environment = {
+                "CPANEL_FTP_HOST": "ftp.example.test",
+                "CPANEL_FTP_USERNAME": "deploy@example.test",
+                "CPANEL_FTP_PASSWORD": "not-printed",
+                "CPANEL_FTP_PORT": "21",
+            }
+
+            with patch.dict("os.environ", environment, clear=False):
+                with self.assertRaises(RuntimeError):
+                    deploy(source, "/", manifest_remote="/.deploy-manifest.json")
+
+    @patch("ftps_deploy.FTP_TLS")
+    def test_ignores_manifest_when_target_root_mismatches(self, ftp_factory):
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir)
+            (source / "file.txt").write_text("content")
+
+            import hashlib
+            digest = hashlib.sha256(b"content").hexdigest()
+            mismatched_manifest = json.dumps(
+                {
+                    "version": 1,
+                    "target": "/other-root",
+                    "files": {
+                        "file.txt": {"sha256": digest, "size": len(b"content")},
+                    },
+                }
+            ).encode("utf-8")
+
+            ftp = MagicMock()
+            ftp.retrbinary.side_effect = lambda cmd, callback: callback(mismatched_manifest)
+            ftp.size.return_value = len(b"content")
+            ftp_factory.return_value.__enter__.return_value = ftp
+
+            environment = {
+                "CPANEL_FTP_HOST": "ftp.example.test",
+                "CPANEL_FTP_USERNAME": "deploy@example.test",
+                "CPANEL_FTP_PASSWORD": "not-printed",
+                "CPANEL_FTP_PORT": "21",
+            }
+
+            with patch.dict("os.environ", environment, clear=False):
+                stats = deploy(source, "/api", manifest_remote="/.manifest.json")
+
+            # Target mismatch causes full manifest rejection; file must be re-uploaded.
+            self.assertEqual(stats["skipped"], 0)
+            self.assertEqual(stats["uploaded"], 1)
+
+    @patch("ftps_deploy.deploy")
+    def test_cli_recognizes_force_flag_before_positional_arguments(self, deploy_mock):
+        deploy_mock.return_value = {"uploaded": 0, "skipped": 0}
+
+        with patch.object(sys, "argv", ["ftps_deploy.py", "--force", "backend", "/api", "/m.json"]):
+            exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        args = deploy_mock.call_args.args
+        self.assertEqual(args[0], Path("backend"))
+        self.assertEqual(args[1], "/api")
+        self.assertEqual(args[2], "/m.json")
+        self.assertTrue(args[3])
+
+    @patch("ftps_deploy.deploy")
+    def test_cli_defaults_to_incremental_when_force_flag_is_absent(self, deploy_mock):
+        deploy_mock.return_value = {"uploaded": 0, "skipped": 0}
+
+        with patch.object(sys, "argv", ["ftps_deploy.py", "frontend/dist", "/", "/m.json"]):
+            exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(deploy_mock.call_args.args[3])
+
 
 
 if __name__ == "__main__":

@@ -95,7 +95,7 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def load_manifest(ftp: FTP_TLS, manifest_remote: str) -> dict:
+def load_manifest(ftp: FTP_TLS, manifest_remote: str, expected_target: str | None = None) -> dict:
     buffer = io.BytesIO()
     try:
         ftp.retrbinary(f"RETR {manifest_remote}", buffer.write)
@@ -108,6 +108,8 @@ def load_manifest(ftp: FTP_TLS, manifest_remote: str) -> dict:
         return {"files": {}}
 
     if not isinstance(data, dict) or data.get("version") != MANIFEST_VERSION:
+        return {"files": {}}
+    if expected_target is not None and data.get("target") != expected_target:
         return {"files": {}}
     if not isinstance(data.get("files"), dict):
         return {"files": {}}
@@ -166,7 +168,11 @@ def deploy(
         ftp.login(username, password)
         ftp.prot_p()
 
-        previous = {"files": {}} if force or not manifest_remote else load_manifest(ftp, manifest_remote)
+        previous = (
+            {"files": {}}
+            if force or not manifest_remote
+            else load_manifest(ftp, manifest_remote, remote_root)
+        )
         previous_files = previous.get("files", {})
         current_files: dict[str, dict] = {}
         created: set[str] = set()
@@ -197,13 +203,13 @@ def deploy(
             stats["uploaded"] += 1
 
         # File yang hilang di sumber sengaja tidak dihapus dari server.
-        if manifest_remote and stats["uploaded"] > 0:
-            save_manifest(
-                ftp,
-                manifest_remote,
-                {"version": MANIFEST_VERSION, "target": remote_root, "files": current_files},
-                created,
-            )
+        if manifest_remote and stats["uploaded"] > 0 and not save_manifest(
+            ftp,
+            manifest_remote,
+            {"version": MANIFEST_VERSION, "target": remote_root, "files": current_files},
+            created,
+        ):
+            raise RuntimeError(f"Failed to persist deployment manifest to {manifest_remote}")
 
     return stats
 
@@ -217,7 +223,7 @@ def main() -> int:
         return 2
 
     arguments = [item for item in sys.argv[1:] if item != "--force"]
-    force = "--force" in sys.argv[3:]
+    force = "--force" in sys.argv[1:]
     manifest_remote = arguments[2] if len(arguments) > 2 else None
 
     try:

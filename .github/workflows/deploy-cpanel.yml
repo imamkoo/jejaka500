@@ -33,19 +33,36 @@ jobs:
   deploy:
     name: Build & deploy ke cPanel (FTPS)
     if: |
-      vars.CPANEL_FTP_HOST != '' &&
-      (
-        github.event_name == 'workflow_run' &&
-        github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.head_branch == 'main' &&
-        github.event.workflow_run.conclusion == 'success'
-      ) || (
-        github.event_name == 'workflow_dispatch' &&
-        github.ref == 'refs/heads/main'
+      vars.CPANEL_FTP_HOST != '' && (
+        (
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.conclusion == 'success'
+        ) || (
+          github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/main'
+        )
       )
     runs-on: ubuntu-latest
 
     steps:
+      - name: Preflight cPanel credentials
+        env:
+          CPANEL_FTP_HOST: ${{ vars.CPANEL_FTP_HOST }}
+          CPANEL_FTP_USERNAME: ${{ vars.CPANEL_FTP_USERNAME }}
+          CPANEL_FTP_PASSWORD: ${{ secrets.CPANEL_FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in CPANEL_FTP_HOST CPANEL_FTP_USERNAME CPANEL_FTP_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name belum diisi di Settings -> Secrets and variables -> Actions"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
       - name: Checkout code
         uses: actions/checkout@v7
         with:
