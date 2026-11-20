@@ -83,6 +83,10 @@ jobs:
       - name: Install Composer dependencies (production)
         working-directory: backend
         run: |
+          # `composer` di bawah ini memicu workflow `Update Composer Lock`; CI
+          # bukan commit. Tanpa ini, setiap deploy memunculkan run workflow lain
+          # yang gagal (GITHUB_TOKEN tidak boleh push), dan filter nama di
+          # `workflow_run` membuat deploy berikutnya tidak terpicu.
           composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
           # Dokumentasi vendor tidak dipakai saat runtime dan menambah ribuan file.
           find vendor -type d -name docs -prune -exec rm -rf {} + 2>/dev/null || true
