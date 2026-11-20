@@ -33,6 +33,16 @@ error_reporting(E_ALL);
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 
+if (! is_file(__DIR__.'/deploy-lib.php')) {
+    // Tanpa pesan jelas, `require` menghasilkan fatal error yang menyesatkan.
+    http_response_code(503);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo 'deploy-lib.php tidak ditemukan di '.__DIR__."\n";
+    echo "Unggah deploy-lib.php ke folder yang sama dengan handler ini.\n";
+
+    exit;
+}
+
 require __DIR__.'/deploy-lib.php';
 
 // `__DIR__` = tempat handler dipasang (`api/storage/cpanel-deploy`).
