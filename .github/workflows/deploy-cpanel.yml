@@ -32,11 +32,11 @@ env:
 jobs:
   deploy:
     name: Build & deploy ke cPanel (arsip bertahap)
-    # Job hanya berjalan bila prasyarat server sudah siap. Bila token belum ada,
-    # job di-skip (bukan gagal) supaya push ke main tidak memunculkan CI merah
-    # padahal tidak ada yang rusak.
+    # Job hanya berjalan bila prasyarat server sudah siap. Penanda sengaja
+    # memakai `vars`, bukan `secrets`: context `secrets` tidak tersedia di
+    # `jobs.<id>.if`. Token sendiri tetap dikirim lewat env di step.
     if: |
-      secrets.CPANEL_DEPLOY_TOKEN != '' && (
+      vars.CPANEL_DEPLOY_READY == 'true' && (
         (
           github.event_name == 'workflow_run' &&
           github.event.workflow_run.event == 'push' &&
@@ -83,6 +83,10 @@ jobs:
       - name: Install Composer dependencies (production)
         working-directory: backend
         run: |
+          # `composer` di bawah ini memicu workflow `Update Composer Lock`; CI
+          # bukan commit. Tanpa ini, setiap deploy memunculkan run workflow lain
+          # yang gagal (GITHUB_TOKEN tidak boleh push), dan filter nama di
+          # `workflow_run` membuat deploy berikutnya tidak terpicu.
           composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
           # Dokumentasi vendor tidak dipakai saat runtime dan menambah ribuan file.
           find vendor -type d -name docs -prune -exec rm -rf {} + 2>/dev/null || true
