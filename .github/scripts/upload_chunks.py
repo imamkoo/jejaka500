@@ -11,7 +11,7 @@ luar jendela waktu atau nonce yang sudah dipakai.
 
 Secret yang sama harus terpasang di dua tempat: secret GitHub
 `CPANEL_DEPLOY_SECRET` dan file di server
-`storage/framework/deploy-secret.txt` (di luar docroot).
+`api/storage/cpanel-deploy/deploy-secret.txt` (di luar docroot).
 """
 
 import hashlib
@@ -24,7 +24,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-DEFAULT_ENDPOINT = "https://jejaka500.followtheline.id/api/deploy-extract.php"
+DEFAULT_ENDPOINT = (
+    "https://jejaka500.followtheline.id/api/public/cpanel-deploy.php"
+)
 
 # Jendela toleransi clock skew. Lebih lebar dari CI yang lambat, tetap jauh
 # lebih sempit daripada masa berlaku token statis.

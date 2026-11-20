@@ -172,5 +172,32 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      # Tanpa PHP, tes yang mengeksekusi handler (`deploy-lib.php`) akan
+      # ter-skip diam-diam dan kesalahan pemetaan tujuan lolos ke produksi.
+      # `zip` wajib: alur ekstraksi memakai `ZipArchive`, sama seperti server.
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: zip
+          coverage: none
+
+      - name: Verify PHP prerequisites are present
+        run: |
+          set -euo pipefail
+          php -r 'if (! class_exists("ZipArchive")) { fwrite(STDERR, "ZipArchive tidak tersedia\n"); exit(1); }'
+          php -v | head -1
+
       - name: Run deploy tooling tests
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      # Tes PHP harus benar-benar dieksekusi, bukan ter-skip.
+      - name: Fail when PHP behaviour tests were skipped
+        run: |
+          set -euo pipefail
+          output=$(python3 -m unittest discover -s .github/scripts -p 'test_*.py' 2>&1)
+          if grep -q "skipped 'ekstensi zip PHP" <<<"$output"; then
+            echo "::error::Tes ekstraksi ter-skip: ekstensi zip PHP tidak terpasang."
+            exit 1
+          fi
+          echo "$output" | tail -3

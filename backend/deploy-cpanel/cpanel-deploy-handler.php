@@ -1,60 +1,51 @@
 <?php
 
 /**
- * Penerima arsip deploy untuk cPanel (mode bertahap).
+ * Handler deploy cPanel — berjalan DI LUAR docroot.
  *
- * Server menolak body request di atas 8 MiB, sedangkan arsip backend ±43 MiB.
- * Karena itu workflow mengirim arsip sebagai beberapa bagian. Endpoint ini
- * menyimpan tiap bagian, lalu saat bagian terakhir tiba ia menggabungkan,
- * memverifikasi SHA-256, dan mengekstrak ke direktori tujuan.
+ * Berkas ini dipasang di `api/storage/cpanel-deploy/` sehingga request web
+ * tidak dapat menjangkaunya. `api/public/cpanel-deploy.php` hanya shim tiga
+ * baris yang memuatnya.
  *
- * Tata letak tujuan (dipetakan dari Bash `rsync backend/ -> /api`):
+ * Mengapa harus di luar docroot: pengukuran 2026-11-20 membuktikan
+ * `GET /api/public/deploy-extract.php` mengembalikan 405 — PHP di `api/public/`
+ * **dieksekusi langsung lewat web**, melewati front controller Laravel. Endpoint
+ * yang hanya mengandalkan tanda tangan di direktori itu menambah permukaan
+ * serangan yang tidak perlu.
  *
- *   /api/public/                isi `public/`  (index.php, .htaccess, build/, css/, js/)
- *   /api/                       seluruh kode    (app/, vendor/, artisan, routes/, ...)
+ * Tata letak server (terukur, bukan asumsi):
  *
- * Keamanan:
- * - Autentikasi HMAC: setiap request membawa timestamp, nonce, dan tanda tangan
- *   `hmac_sha256(secret, timestamp:nonce:archive_sha256)`. Secret dibaca dari
- *   `storage/framework/deploy-secret.txt` (di luar docroot) dan tidak pernah
- *   melintas jaringan.
- * - Timestamp di luar jendela waktu ditolak; nonce yang sudah dipakai ditolak.
- * - Setiap entri arsip divalidasi sebelum satu file pun ditulis.
- * - `.env`, `storage/`, `bootstrap/cache/config.php`, dan helper deploy sendiri
- *   tidak pernah ditimpa.
+ *   /jejaka500/            docroot web (SPA: index.html, assets/, sw.js)
+ *   /jejaka500/api/        app root Laravel
+ *   /jejaka500/api/public/ direktori biasa di dalam docroot, bukan docroot
+ *
+ * `.htaccess` root meng-rewrite `^api` ke `api/public/index.php`, dan Filament
+ * memakai URL aset top-level (`/css`, `/js`, `/fonts/filament`, `/storage`).
+ *
+ * Keamanan: HMAC `sha256(secret, timestamp:nonce:archive_sha256)`, secret di
+ * `deploy-secret.txt` (0600, di luar docroot), jendela 600 detik, nonce sekali
+ * pakai, dan seluruh entri arsip divalidasi sebelum satu berkas pun ditulis.
  */
 
 declare(strict_types=1);
 
-// `rsync backend/ -> /api` menaruh app root Laravel di `/api` dan docroot di
-// `/api/public`. Endpoint ini hidup di docroot, jadi app root adalah satu level
-// di atasnya.
-const APP_ROOT_DIR = __DIR__.'/..';
-const PUBLIC_DIR = __DIR__;
-const DEPLOY_SECRET_FILE = APP_ROOT_DIR.'/storage/framework/deploy-secret.txt';
-const DEPLOY_NONCE_DIR = APP_ROOT_DIR.'/storage/framework/deploy-nonces';
-const DEPLOY_STAGING_DIR = APP_ROOT_DIR.'/storage/framework/deploy-staging';
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
 
-// Toleransi clock skew antara server dan runner GitHub.
-const SIGNATURE_WINDOW_SECONDS = 600;
+require __DIR__.'/deploy-lib.php';
 
-const PUBLIC_PREFIX = 'public/';
+// `__DIR__` = tempat handler dipasang (`api/storage/cpanel-deploy`).
+const DEPLOY_DIR = __DIR__;
+const APP_ROOT_DIR = __DIR__.'/../..';
+const ENTRY_DIR = APP_ROOT_DIR.'/public';
+
+const DEPLOY_SECRET_FILE = DEPLOY_DIR.'/deploy-secret.txt';
+const DEPLOY_NONCE_DIR = DEPLOY_DIR.'/nonces';
+const DEPLOY_STAGING_DIR = DEPLOY_DIR.'/staging';
+
 const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 400 * 1024 * 1024;
-
-// Artefak deploy tidak boleh menimpa rahasia atau state runtime.
-const FORBIDDEN_PATHS = [
-    '.env',
-    'storage/',
-    'bootstrap/cache/config.php',
-];
-
-// Helper deploy tidak perlu ikut tergantikan; juga mencegah versi lain menimpa
-// endpoint yang sedang dipakai.
-const FORBIDDEN_EXACT = [
-    'public/deploy-extract.php',
-    'public/deploy-secret.php',
-];
 
 function respond(int $status, string $message): never
 {
@@ -62,6 +53,15 @@ function respond(int $status, string $message): never
     header('Content-Type: text/plain; charset=utf-8');
     echo $message."\n";
     exit;
+}
+
+function stderr_write(string $message): void
+{
+    $stream = fopen('php://stderr', 'wb');
+    if ($stream !== false) {
+        fwrite($stream, $message."\n");
+        fclose($stream);
+    }
 }
 
 function remove_directory(string $directory): void
@@ -82,100 +82,41 @@ function remove_directory(string $directory): void
 }
 
 /**
- * Petakan nama entri arsip ke (direktori tujuan, path relatif).
- *
- * @return array{0: string, 1: string}|null null bila entri tidak boleh ditulis
+ * Buat secret HMAC baru. Hanya lewat CLI; menolak bila secret sudah ada.
  */
-function resolve_destination(string $normalized): ?array
+function generate_secret(): never
 {
-    if ($normalized === '' || str_contains($normalized, '..') || str_starts_with($normalized, '/')) {
-        return null;
+    if (is_file(DEPLOY_SECRET_FILE)) {
+        stderr_write('Secret sudah ada di '.DEPLOY_SECRET_FILE."\n"
+            ."Hapus berkas itu lebih dulu bila memang ingin merotasi, lalu perbarui\n"
+            .'secret GitHub CPANEL_DEPLOY_SECRET.');
+        exit(1);
     }
 
-    foreach (FORBIDDEN_PATHS as $forbidden) {
-        if ($normalized === $forbidden || str_starts_with($normalized, $forbidden)) {
-            return null;
-        }
+    if (! is_dir(DEPLOY_DIR) && ! mkdir(DEPLOY_DIR, 0o755, true) && ! is_dir(DEPLOY_DIR)) {
+        stderr_write('Tidak bisa membuat direktori '.DEPLOY_DIR);
+        exit(1);
     }
 
-    foreach (FORBIDDEN_EXACT as $blocked) {
-        if ($normalized === $blocked) {
-            return null;
-        }
+    $secret = bin2hex(random_bytes(32));
+    if (file_put_contents(DEPLOY_SECRET_FILE, $secret."\n") === false) {
+        stderr_write('Tidak bisa menulis '.DEPLOY_SECRET_FILE);
+        exit(1);
     }
+    chmod(DEPLOY_SECRET_FILE, 0o600);
 
-    if ($normalized === 'public') {
-        return null; // direktori, bukan berkas
-    }
-
-    if (str_starts_with($normalized, PUBLIC_PREFIX)) {
-        return [PUBLIC_DIR, substr($normalized, strlen(PUBLIC_PREFIX))];
-    }
-
-    return [APP_ROOT_DIR, $normalized];
+    echo $secret."\n";
+    exit;
 }
 
-/**
- * Verifikasi tanda tangan HMAC.
- *
- * @param  string|null  $nonceDir  Direktori penanda nonce; null = lokasi produksi.
- * @return array{ok: bool, reason: string}
- */
-function verify_signature(
-    string $secret,
-    string $timestamp,
-    string $nonce,
-    string $archiveSha,
-    string $signature,
-    ?int $now = null,
-    ?string $nonceDir = null
-): array {
-    if ($secret === '') {
-        return ['ok' => false, 'reason' => 'server secret missing'];
-    }
-    if ($signature === '' || $nonce === '' || $timestamp === '') {
-        return ['ok' => false, 'reason' => 'missing signature'];
-    }
-    if (! ctype_digit($timestamp)) {
-        return ['ok' => false, 'reason' => 'bad timestamp'];
+if (PHP_SAPI === 'cli') {
+    if (in_array('--generate-secret', $_SERVER['argv'] ?? [], true)) {
+        generate_secret();
     }
 
-    $now = $now ?? time();
-    if (abs($now - (int) $timestamp) > SIGNATURE_WINDOW_SECONDS) {
-        return ['ok' => false, 'reason' => 'expired'];
-    }
-
-    $expected = hash_hmac('sha256', $timestamp.':'.$nonce.':'.$archiveSha, $secret);
-    if (! hash_equals($expected, strtolower($signature))) {
-        return ['ok' => false, 'reason' => 'bad signature'];
-    }
-
-    $nonceDir = $nonceDir ?? DEPLOY_NONCE_DIR;
-
-    // Nonce sekali pakai: replay dalam jendela waktu tetap ditolak meski
-    // tanda tangan sah. File penanda berumur sama dengan jendela waktu.
-    if (! is_dir($nonceDir)
-        && ! mkdir($nonceDir, 0o700, true)
-        && ! is_dir($nonceDir)) {
-        return ['ok' => false, 'reason' => 'nonce store unavailable'];
-    }
-
-    foreach (glob($nonceDir.'/*') ?: [] as $stale) {
-        if (is_file($stale) && filemtime($stale) < $now - SIGNATURE_WINDOW_SECONDS * 2) {
-            @unlink($stale);
-        }
-    }
-
-    $marker = $nonceDir.'/'.hash('sha256', $nonce);
-    // `x` gagal bila file sudah ada -> atomik, tanpa race antar request paralel.
-    $handle = @fopen($marker, 'x');
-    if ($handle === false) {
-        return ['ok' => false, 'reason' => 'replayed nonce'];
-    }
-    fclose($handle);
-    @chmod($marker, 0o600);
-
-    return ['ok' => true, 'reason' => 'ok'];
+    stderr_write("Bukan untuk dijalankan langsung.\n"
+        .'Buat secret: php '.DEPLOY_DIR.'/cpanel-deploy-handler.php --generate-secret');
+    exit(1);
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
@@ -192,11 +133,12 @@ $verification = verify_signature(
     (string) ($_SERVER['HTTP_X_DEPLOY_TIMESTAMP'] ?? ''),
     (string) ($_SERVER['HTTP_X_DEPLOY_NONCE'] ?? ''),
     $archiveShaHeader,
-    (string) ($_SERVER['HTTP_X_DEPLOY_SIGNATURE'] ?? '')
+    (string) ($_SERVER['HTTP_X_DEPLOY_SIGNATURE'] ?? ''),
+    DEPLOY_NONCE_DIR
 );
 
 if (! $verification['ok']) {
-    error_log('[deploy-extract] auth ditolak: '.$verification['reason']);
+    error_log('[cpanel-deploy] auth ditolak: '.$verification['reason']);
     respond(403, 'Forbidden');
 }
 
@@ -234,7 +176,7 @@ $partPath = sprintf('%s/part%04d', DEPLOY_STAGING_DIR, $index);
 if (! move_uploaded_file($upload['tmp_name'], $partPath)) {
     respond(500, 'Cannot store chunk');
 }
-chmod($partPath, 0o600);
+chmod($partPath, 0o644);
 
 $received = count(glob(DEPLOY_STAGING_DIR.'/part*') ?: []);
 if ($received < $total) {
@@ -271,8 +213,7 @@ for ($part = 0; $part < $total; $part++) {
 }
 fclose($handle);
 
-$archiveSha = strtolower((string) ($_SERVER['HTTP_X_DEPLOY_SHA256'] ?? ''));
-if ($archiveSha === '' || ! hash_equals($archiveSha, hash_file('sha256', $combined))) {
+if ($archiveShaHeader === '' || ! hash_equals($archiveShaHeader, hash_file('sha256', $combined))) {
     remove_directory(DEPLOY_STAGING_DIR);
     respond(422, 'Archive checksum mismatch');
 }
@@ -283,9 +224,7 @@ if ($zip->open($combined) !== true) {
     respond(422, 'Archive is not a readable ZIP');
 }
 
-$publicDir = realpath(PUBLIC_DIR);
-$appRoot = realpath(APP_ROOT_DIR);
-if ($publicDir === false || $appRoot === false) {
+if (realpath(ENTRY_DIR) === false || realpath(APP_ROOT_DIR) === false) {
     $zip->close();
     remove_directory(DEPLOY_STAGING_DIR);
     respond(500, 'Target directory unavailable');
@@ -297,7 +236,7 @@ for ($entry = 0; $entry < $zip->numFiles; $entry++) {
     $name = (string) $zip->getNameIndex($entry);
     $normalized = str_replace('\\', '/', ltrim($name, '/'));
 
-    $destination = resolve_destination($normalized);
+    $destination = resolve_destination($normalized, ENTRY_DIR, APP_ROOT_DIR);
     if ($destination === null) {
         if ($normalized === 'public' || $normalized === '') {
             continue; // entri direktori
@@ -352,5 +291,5 @@ respond(200, sprintf(
     $extracted,
     $written,
     $totalBytes,
-    $archiveSha
+    $archiveShaHeader
 ));

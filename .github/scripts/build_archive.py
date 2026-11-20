@@ -3,7 +3,7 @@
 
 Mengunggah puluhan ribu file satu per satu lewat FTPS butuh jam dan mudah
 terputus. Satu ZIP bisa diunggah dalam hitungan menit, lalu diekstrak di
-server oleh `backend/public/deploy-extract.php` yang dikunci token.
+server oleh `cpanel-deploy-handler.php` yang dikunci tanda tangan HMAC.
 
 Arsip tidak boleh memuat rahasia atau state runtime: `.env`, `storage/`,
 `tests/`, `docker/`, dan `node_modules/` selalu dibuang.
@@ -20,10 +20,13 @@ EXCLUDED_PARTS = {".git", ".github", "node_modules", "tests", "docker", "storage
 FILE_MODE = 0o644
 DIR_MODE = 0o755
 
-# Server menolak body request di atas 8 MiB (413 dari PHP). Sisakan ruang untuk
-# overhead multipart dan header, dan jangan pernah melewati batas itu.
+# Server menolak body request di atas 8 MiB (413 dari PHP). Namun
+# `upload_max_filesize` terukur hanya **2M** (LiteSpeed mengabaikan `.user.ini`),
+# sehingga potongan wajib berada di bawah itu. Sisakan ruang untuk overhead
+# multipart dan header tanda tangan.
+SERVER_UPLOAD_LIMIT_BYTES = 2 * 1024 * 1024
 SERVER_BODY_LIMIT_BYTES = 8 * 1024 * 1024
-DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024
+DEFAULT_CHUNK_BYTES = 1536 * 1024
 
 
 def EXCLUDED_FROM_ARCHIVE(path: PurePosixPath) -> bool:
@@ -38,9 +41,7 @@ def EXCLUDED_FROM_ARCHIVE(path: PurePosixPath) -> bool:
         return True
     if name in {"phpunit.xml", ".phpunit.result.cache"}:
         return True
-    if path == PurePosixPath("public/deploy-extract.php"):
-        return True
-    if path == PurePosixPath("public/deploy-secret.php"):
+    if path == PurePosixPath("public/cpanel-deploy.php"):
         return True
     if (
         name == "config.php"
@@ -120,9 +121,9 @@ def chunk_archive(
     archive = Path(archive)
     output_dir = Path(output_dir)
 
-    if chunk_bytes > SERVER_BODY_LIMIT_BYTES:
+    if chunk_bytes > SERVER_UPLOAD_LIMIT_BYTES:
         raise ValueError(
-            f"chunk_bytes {chunk_bytes} melebihi batas body server {SERVER_BODY_LIMIT_BYTES}"
+            f"chunk_bytes {chunk_bytes} melebihi upload_max_filesize server {SERVER_UPLOAD_LIMIT_BYTES}"
         )
     if chunk_bytes <= 0:
         raise ValueError("chunk_bytes harus positif")
