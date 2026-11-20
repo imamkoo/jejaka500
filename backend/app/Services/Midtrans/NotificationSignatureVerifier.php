@@ -13,9 +13,9 @@ final class NotificationSignatureVerifier
         $orderId = $payload['order_id'] ?? null;
         $statusCode = $payload['status_code'] ?? null;
         $grossAmount = $payload['gross_amount'] ?? null;
-        $serverKey = config('midtrans.server_key');
+        $verificationKey = config('midtrans.signature_secret_key') ?: config('midtrans.server_key');
 
-        if (! is_string($signatureKey) || $signatureKey === '' || ! is_string($serverKey) || $serverKey === '') {
+        if (! is_string($signatureKey) || $signatureKey === '' || ! is_string($verificationKey) || $verificationKey === '') {
             return false;
         }
 
@@ -27,7 +27,7 @@ final class NotificationSignatureVerifier
         $statusCode = (string) $statusCode;
         $grossAmount = (string) $grossAmount;
 
-        $expected = hash('sha512', $orderId.$statusCode.$grossAmount.$serverKey);
+        $expected = hash('sha512', $orderId.$statusCode.$grossAmount.$verificationKey);
 
         return hash_equals(strtolower($expected), strtolower($signatureKey));
     }
