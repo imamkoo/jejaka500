@@ -342,76 +342,44 @@ cd ~/jejaka500 && php artisan config:cache && php artisan route:cache
 
 ---
 
-## 13. Deploy otomatis via SSH (CI/CD)
+## 13. Deploy otomatis ke cPanel via FTPS (CI/CD)
 
-Setelah SSH aktif, deploy tidak lagi manual. Workflow
-`.github/workflows/deploy-cpanel.yml` berjalan setiap CI di `main` sukses:
+Deploy otomatis berjalan via explicit FTPS (port 21) menggunakan workflow
+`.github/workflows/deploy-cpanel.yml` setiap CI di `main` sukses:
 
 ```
-push main → CI (Pint/Pest/frontend/MySQL) → build backend+frontend
-          → rsync ke server → artisan migrate --force + cache → smoke test /up
+push main → CI (Pint/Pest/frontend/MySQL) → build backend (vendor + wayfinder + Vite)
+          → build frontend (dist) → upload aditif ke cPanel via FTPS → smoke test /up
 ```
 
-### Yang harus tersedia di server
+### Struktur akun FTP yang aman
 
-- SSH aktif untuk user cPanel, port 22 (atau custom).
-- `rsync` tersedia di server (`rsync --version`). CloudHost/LiteSpeed biasanya ada;
-  kalau tidak, minta support memasangnya.
-- Public key deploy di `~/.ssh/authorized_keys` (chmod 600) — **disarankan**
-  dibanding password.
-- Folder backend & frontend sudah dibuat dan docroot sudah menunjuk ke sana.
+Gunakan akun FTP scoped khusus agar tidak menyentuh seluruh akun hosting:
 
-### Isi di GitHub (Settings → Secrets and variables → Actions)
+- **Directory:** `/home/permatat/followtheline.id/jejaka500`
+- Akun ini melihat:
+  - `/` -> root docroot SPA
+  - `/api` -> root Laravel
 
-**Variables** (bukan rahasia):
+### Variabel & Secret GitHub Actions
 
-| Nama | Contoh |
-|---|---|
-| `CPANEL_HOST` | `api.jejaka500.id` |
-| `CPANEL_PORT` | `22` |
-| `CPANEL_USER` | `imamkoo` |
-| `CPANEL_BACKEND_PATH` | `/home/imamkoo/jejaka500` |
-| `CPANEL_FRONTEND_PATH` | `/home/imamkoo/jejaka500-web` |
-| `CPANEL_PHP_BIN` | `/opt/cpanel/ea-php84/root/usr/bin/php` |
-| `CPANEL_API_BASE_URL` | `https://api.jejaka500.id/api` |
-| `CPANEL_PUBLIC_URL` | `https://api.jejaka500.id` |
+**Settings → Secrets and variables → Actions**
+
+**Variables:**
+- `CPANEL_FTP_HOST`: `ftp.permatatourtravel.com` (atau `103.63.24.171`)
+- `CPANEL_FTP_PORT`: `21`
+- `CPANEL_FTP_USERNAME`: `jejaka-deploy@permatatourtravel.com`
+- `CPANEL_API_BASE_URL`: `https://jejaka500.followtheline.id/api` (opsional, default ini)
+- `CPANEL_PUBLIC_URL`: `https://jejaka500.followtheline.id` (opsional, default ini)
 
 **Secrets:**
+- `CPANEL_FTP_PASSWORD`: password akun FTP yang dibuat di cPanel (jangan simpan di chat/repo)
 
-| Nama | Isi |
-|---|---|
-| `CPANEL_SSH_KEY` | private key deploy (format OpenSSH, tanpa passphrase) |
-| `CPANEL_SSH_KNOWN_HOSTS` | output `ssh-keyscan -p 22 api.jejaka500.id` |
-| `CPANEL_PASSWORD` | alternatif bila key tidak bisa dipakai |
+### Proteksi keamanan bawaan script FTPS
 
-Membuat keypair di lokal:
-
-```bash
-ssh-keygen -t ed25519 -C "github-actions-jejaka500" -f ~/.ssh/jejaka500_deploy -N ""
-ssh-keyscan -p 22 api.jejaka500.id
-# public key (~/.ssh/jejaka500_deploy.pub) -> tempel ke ~/.ssh/authorized_keys di server
-# private key (~/.ssh/jejaka500_deploy)    -> isi secret CPANEL_SSH_KEY
-```
-
-### Urutan aman pertama kali
-
-1. Isi Variables + secret. **Jangan** ubah DNS dulu.
-2. Actions → **Deploy (cPanel via SSH)** → *Run workflow* → centang **dry_run**.
-   Periksa daftar file yang akan dikirim; tidak ada perubahan di server.
-3. Jalankan lagi **tanpa** dry_run (sekali ini centang `skip_migrate` **tidak**
-   perlu; biarkan migrasi jalan agar skema terbentuk).
-4. Cek `https://api.jejaka500.id/up` dan `/admin/login`.
-5. Baru arahkan DNS/domain, lalu matikan Render/Vercel.
-
-### Perilaku yang perlu diketahui
-
-- `.env` **tidak pernah** ditimpa (di-exclude), `storage/` juga tidak tersentuh —
-  foto aman.
-- `public/storage` (symlink) di-exclude agar tidak terhapus oleh `--delete`.
-- `db:seed` **tidak** dijalankan otomatis; hanya sekali di awal (manual).
-- `route:cache` tidak dipakai; cukup `config:cache` + `view:cache`.
-- Job otomatis di-skip selama `CPANEL_HOST` kosong, jadi workflow ini aman
-  di-merge sebelum hosting siap.
+- **Aditif (tanpa delete):** tidak menghapus file server yang ada.
+- **Proteksi ketat:** `.env`, `.env.*`, `storage/`, `tests/`, `docker/`, dan file `.htaccess` di-exclude dari penimpaan langsung.
+- **Path traversal guard:** menolak `..`, path absolut, dan karakter kontrol (`\r`, `\n`).
 
 ## Lampiran A — Data lama dari Render
 

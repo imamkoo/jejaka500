@@ -1,25 +1,8 @@
-name: Deploy (cPanel via SSH)
+name: Deploy (cPanel via FTPS)
 
-# Deploy otomatis ke hosting cPanel setiap CI di `main` selesai sukses.
-# Butuh: rsync + SSH ke akun hosting.
-#
-# Nonaktif secara otomatis (job di-skip) selama variabel CPANEL_HOST belum diisi
-# di Settings → Secrets and variables → Actions → Variables.
-#
-# Variabel (Variables, bukan secret):
-#   CPANEL_HOST            api.jejaka500.id
-#   CPANEL_PORT            22 (opsional, default 22)
-#   CPANEL_USER            username cPanel
-#   CPANEL_BACKEND_PATH    /home/USER/jejaka500
-#   CPANEL_FRONTEND_PATH   /home/USER/jejaka500-web
-#   CPANEL_PHP_BIN         /opt/cpanel/ea-php84/root/usr/bin/php (opsional)
-#   CPANEL_API_BASE_URL    https://api.jejaka500.id/api (opsional)
-#   CPANEL_PUBLIC_URL      https://api.jejaka500.id (opsional, untuk smoke test)
-#
-# Secret (pilih salah satu):
-#   CPANEL_SSH_KEY         private key deploy (disarankan)
-#   CPANEL_PASSWORD        password SSH (bila key tidak bisa dipakai)
-#   CPANEL_SSH_KNOWN_HOSTS isi output `ssh-keyscan -p PORT HOST` (disarankan)
+# Deploy otomatis ke cPanel setiap CI di `main` selesai sukses.
+# Memakai explicit FTPS (TLS port 21) dan upload aditif tanpa flag delete,
+# sehingga file .env, folder storage, dan aturan routing .htaccess yang ada di server tetap aman.
 
 on:
   workflow_run:
@@ -27,15 +10,6 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Dry-run (tampilkan file yang akan berubah, tanpa upload)'
-        type: boolean
-        default: false
-      skip_migrate:
-        description: 'Lewati php artisan migrate'
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -46,18 +20,15 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BACKEND_PATH: ${{ vars.CPANEL_BACKEND_PATH }}
-  FRONTEND_PATH: ${{ vars.CPANEL_FRONTEND_PATH }}
-  PHP_BIN: ${{ vars.CPANEL_PHP_BIN || 'php' }}
-  API_BASE_URL: ${{ vars.CPANEL_API_BASE_URL || 'https://api.jejaka500.id/api' }}
-  SSH_PORT: ${{ vars.CPANEL_PORT || '22' }}
+  API_BASE_URL: ${{ vars.CPANEL_API_BASE_URL || 'https://jejaka500.followtheline.id/api' }}
+  PUBLIC_URL: ${{ vars.CPANEL_PUBLIC_URL || 'https://jejaka500.followtheline.id' }}
 
 jobs:
   deploy:
-    name: Build & deploy ke cPanel
-    # Aman: tidak jalan sama sekali sebelum host dikonfigurasi.
+    name: Build & deploy ke cPanel (FTPS)
     if: |
-      vars.CPANEL_HOST != '' && (
+      vars.CPANEL_FTP_HOST != '' &&
+      (github.event_name == 'workflow_run' || github.ref == 'refs/heads/main') && (
         github.event_name == 'workflow_dispatch' ||
         github.event.workflow_run.conclusion == 'success'
       )
@@ -125,126 +96,42 @@ jobs:
           VITE_API_URL: ${{ env.API_BASE_URL }}
         run: pnpm run build
 
-      - name: Attach SPA .htaccess
-        working-directory: frontend
-        run: |
-          cp deploy/cpanel/spa.htaccess dist/.htaccess
-          test -f dist/index.html || { echo "dist/index.html hilang"; exit 1; }
+      - name: Verify script unit tests
+        run: python3 .github/scripts/test_ftps_deploy.py
 
-      - name: Configure SSH
+      - name: Deploy backend (FTPS -> /api)
         env:
-          CPANEL_SSH_KEY: ${{ secrets.CPANEL_SSH_KEY }}
-          CPANEL_SSH_KNOWN_HOSTS: ${{ secrets.CPANEL_SSH_KNOWN_HOSTS }}
-          CPANEL_PASSWORD: ${{ secrets.CPANEL_PASSWORD }}
-        run: |
-          mkdir -p "$HOME/.ssh"
-          chmod 700 "$HOME/.ssh"
+          CPANEL_FTP_HOST: ${{ vars.CPANEL_FTP_HOST }}
+          CPANEL_FTP_PORT: ${{ vars.CPANEL_FTP_PORT || '21' }}
+          CPANEL_FTP_USERNAME: ${{ vars.CPANEL_FTP_USERNAME }}
+          CPANEL_FTP_PASSWORD: ${{ secrets.CPANEL_FTP_PASSWORD }}
+        run: python3 .github/scripts/ftps_deploy.py backend /api
 
-          if [ -n "$CPANEL_SSH_KEY" ]; then
-            printf '%s\n' "$CPANEL_SSH_KEY" > "$HOME/.ssh/deploy_key"
-            chmod 600 "$HOME/.ssh/deploy_key"
-            echo "SSH_KEY_FILE=$HOME/.ssh/deploy_key" >> "$GITHUB_ENV"
-          elif [ -n "$CPANEL_PASSWORD" ]; then
-            sudo apt-get install -y sshpass >/dev/null
-          else
-            echo "Tidak ada CPANEL_SSH_KEY maupun CPANEL_PASSWORD."; exit 1
-          fi
-
-          if [ -n "$CPANEL_SSH_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$CPANEL_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          else
-            ssh-keyscan -p "$SSH_PORT" -H "${{ vars.CPANEL_HOST }}" > "$HOME/.ssh/known_hosts" 2>/dev/null
-          fi
-          chmod 600 "$HOME/.ssh/known_hosts"
-
-      - name: Deploy backend (rsync)
+      - name: Deploy frontend (FTPS -> /)
         env:
-          SSHPASS: ${{ secrets.CPANEL_PASSWORD }}
-        run: |
-          RSYNC_SSH="ssh -p $SSH_PORT -o StrictHostKeyChecking=yes -o ConnectTimeout=20"
-          if [ -n "${SSH_KEY_FILE:-}" ]; then
-            RSYNC_SSH="$RSYNC_SSH -i $SSH_KEY_FILE"
-          else
-            RSYNC_SSH="sshpass -e $RSYNC_SSH"
-          fi
-
-          DRY=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
-
-          rsync -az --itemize-changes $DRY --delete \
-            -e "$RSYNC_SSH" \
-            --exclude='.env' \
-            --exclude='.env.*' \
-            --exclude='storage/' \
-            --exclude='public/storage' \
-            --exclude='node_modules/' \
-            --exclude='tests/' \
-            --exclude='docker/' \
-            --exclude='.git/' \
-            --exclude='.github/' \
-            --exclude='phpunit.xml' \
-            --exclude='.phpunit.result.cache' \
-            --exclude='bootstrap/cache/*.php' \
-            backend/ "${{ vars.CPANEL_USER }}@${{ vars.CPANEL_HOST }}:$BACKEND_PATH/"
-
-      - name: Deploy frontend (rsync)
-        env:
-          SSHPASS: ${{ secrets.CPANEL_PASSWORD }}
-        run: |
-          RSYNC_SSH="ssh -p $SSH_PORT -o StrictHostKeyChecking=yes -o ConnectTimeout=20"
-          if [ -n "${SSH_KEY_FILE:-}" ]; then
-            RSYNC_SSH="$RSYNC_SSH -i $SSH_KEY_FILE"
-          else
-            RSYNC_SSH="sshpass -e $RSYNC_SSH"
-          fi
-
-          DRY=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
-
-          rsync -az --itemize-changes $DRY --delete \
-            -e "$RSYNC_SSH" \
-            frontend/dist/ "${{ vars.CPANEL_USER }}@${{ vars.CPANEL_HOST }}:$FRONTEND_PATH/"
-
-      - name: Migrate + cache (di server)
-        if: ${{ inputs.dry_run != true }}
-        env:
-          SSHPASS: ${{ secrets.CPANEL_PASSWORD }}
-        run: |
-          SSH_OPTS="-p $SSH_PORT -o StrictHostKeyChecking=yes -o ConnectTimeout=20"
-          if [ -n "${SSH_KEY_FILE:-}" ]; then
-            SSH_CMD="ssh $SSH_OPTS -i $SSH_KEY_FILE"
-          else
-            SSH_CMD="sshpass -e ssh $SSH_OPTS"
-          fi
-
-          MIGRATE="1"
-          if [ "${{ inputs.skip_migrate }}" = "true" ]; then MIGRATE="0"; fi
-
-          $SSH_CMD "${{ vars.CPANEL_USER }}@${{ vars.CPANEL_HOST }}" bash -s <<EOF
-          set -euo pipefail
-          cd "$BACKEND_PATH"
-
-          PHP="$PHP_BIN"
-          if ! command -v "\$PHP" >/dev/null 2>&1; then PHP="php"; fi
-
-          echo "==> PHP: \$(\$PHP -v | head -n 1)"
-
-          \$PHP artisan optimize:clear
-          if [ "$MIGRATE" = "1" ]; then
-            \$PHP artisan migrate --force
-          fi
-          \$PHP artisan storage:link || true
-          \$PHP artisan config:cache
-          \$PHP artisan view:cache
-          EOF
+          CPANEL_FTP_HOST: ${{ vars.CPANEL_FTP_HOST }}
+          CPANEL_FTP_PORT: ${{ vars.CPANEL_FTP_PORT || '21' }}
+          CPANEL_FTP_USERNAME: ${{ vars.CPANEL_FTP_USERNAME }}
+          CPANEL_FTP_PASSWORD: ${{ secrets.CPANEL_FTP_PASSWORD }}
+        run: python3 .github/scripts/ftps_deploy.py frontend/dist /
 
       - name: Smoke test
-        if: ${{ inputs.dry_run != true && vars.CPANEL_PUBLIC_URL != '' }}
         run: |
+          set -euo pipefail
+          check_url() {
+            local path="$1"
+            local expected="$2"
+            local code
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${PUBLIC_URL}${path}" || true)
+            echo "${path} -> ${code}"
+            [ "$code" = "$expected" ]
+          }
+
           for i in 1 2 3 4 5; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${{ vars.CPANEL_PUBLIC_URL }}/up" || true)
-            echo "percobaan $i: /up -> $code"
-            [ "$code" = "200" ] && exit 0
+            if check_url "/up" 200 && check_url "/" 200 && check_url "/api/price-categories" 200; then
+              exit 0
+            fi
+            echo "smoke test retry $i"
             sleep 10
           done
-          echo "Health check gagal setelah 5 percobaan"; exit 1
+          echo "Smoke test cPanel gagal setelah 5 percobaan"; exit 1
