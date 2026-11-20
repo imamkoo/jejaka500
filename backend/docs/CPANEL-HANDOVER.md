@@ -119,40 +119,35 @@ Login admin di `https://api.jejaka500.id/admin` dengan `ADMIN_EMAIL`/`ADMIN_PASS
 
 ## 8. Update versi berikutnya
 
-### 8a. Cara otomatis (setelah SSH aktif) — direkomendasikan
+### 8a. Deploy otomatis via GitHub Actions FTPS
 
-Repo sudah punya workflow **`Deploy (cPanel via SSH)`** yang berjalan otomatis
-setiap CI di `main` sukses: build backend + frontend → `rsync` ke server →
-`php artisan migrate --force` + cache. Push ke `main` = website ter-update.
+Workflow **`Deploy (cPanel via FTPS)`** berjalan otomatis setelah CI pada `main`
+sukses:
 
-**Yang admin hosting perlu berikan ke pemilik proyek:**
+```
+push main → CI hijau → build Laravel + SPA → upload via explicit FTPS → smoke test /up
+```
 
-| Data | Contoh |
-|---|---|
-| Host SSH | `103.63.24.171` atau `api.jejaka500.id` |
-| Port SSH | `22` (kadang `2222`) |
-| User cPanel | `imamkoo` |
-| Path dokumen backend | `/home/imamkoo/jejaka500` |
-| Path dokumen frontend | `/home/imamkoo/jejaka500-web` |
-| Path PHP CLI | `/opt/cpanel/ea-php84/root/usr/bin/php` |
-| Public key deploy | (dikirim pemilik proyek, admin menempelkannya di `~/.ssh/authorized_keys`) |
-| Output `ssh-keyscan` | `ssh-keyscan -p 22 HOST` (untuk memverifikasi identitas server) |
+Akun FTP harus dibatasi ke `/home/permatat/followtheline.id/jejaka500`, sehingga
+root FTP `/` adalah docroot SPA dan `/api` adalah aplikasi Laravel. Isi Actions
+Variables `CPANEL_FTP_HOST=ftp.permatatourtravel.com`, `CPANEL_FTP_PORT=21`, dan
+`CPANEL_FTP_USERNAME=jejaka-deploy@permatatourtravel.com`. Simpan password hanya
+di Secret `CPANEL_FTP_PASSWORD`.
 
-Pemilik proyek lalu mengisi **Settings → Secrets and variables → Actions**:
-variabel `CPANEL_HOST`, `CPANEL_USER`, `CPANEL_BACKEND_PATH`,
-`CPANEL_FRONTEND_PATH`, `CPANEL_PHP_BIN`, dan secret `CPANEL_SSH_KEY`.
+Upload bersifat aditif dan tidak menghapus file di server. `.env`, `storage/`,
+dan `.htaccess` akar docroot tidak ditimpa; `.htaccess` bawaan Laravel di
+`api/public/` ikut diperbarui. Manifest hash di `/api/storage/app/private/` membuat file
+yang tidak berubah dilewati setelah deploy pertama. Workflow tidak menjalankan
+Artisan karena FTP bukan shell: perubahan yang memerlukan migrasi database,
+`config:cache`, atau perubahan routing memerlukan langkah terpisah di cPanel.
 
-Sebelum dipakai, jalankan sekali secara **dry-run** (Actions → Deploy (cPanel via
-SSH) → Run workflow → centang `dry_run`) untuk melihat file mana yang berubah
-tanpa menyentuh server.
+### 8b. Jalur manual
 
-Setelah cut-over, workflow `deploy.yml` (Render/Vercel) bisa dimatikan/dihapus.
-
-### 8b. Cara manual (selama SSH belum siap)
-
-Pemilik proyek memberi ZIP baru dari Release terbaru; admin hosting mengulang:
-upload + extract **di atas** folder lama → `php artisan migrate --force` →
-`php artisan config:cache`. Tidak perlu mengulang `db:seed`/`storage:link`.
+ZIP Release tetap bisa dipakai untuk pemulihan atau upload manual. Bila file
+server diubah di luar workflow, jalankan `workflow_dispatch` dengan input
+`force_upload=true` agar semua file sumber diunggah ulang. Setelah perubahan
+yang memerlukan migrasi/config, admin menjalankan perintah Artisan melalui
+cPanel Terminal atau cron sekali-jalan.
 
 ---
 

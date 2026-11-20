@@ -342,76 +342,58 @@ cd ~/jejaka500 && php artisan config:cache && php artisan route:cache
 
 ---
 
-## 13. Deploy otomatis via SSH (CI/CD)
+## 13. Deploy otomatis ke cPanel via FTPS (CI/CD)
 
-Setelah SSH aktif, deploy tidak lagi manual. Workflow
-`.github/workflows/deploy-cpanel.yml` berjalan setiap CI di `main` sukses:
+Deploy otomatis berjalan via explicit FTPS (port 21) menggunakan workflow
+`.github/workflows/deploy-cpanel.yml` setiap CI di `main` sukses:
 
 ```
-push main → CI (Pint/Pest/frontend/MySQL) → build backend+frontend
-          → rsync ke server → artisan migrate --force + cache → smoke test /up
+push main → CI (Pint/Pest/frontend/MySQL) → build backend (vendor + wayfinder + Vite)
+          → build frontend (dist) → upload aditif ke cPanel via FTPS → smoke test /up
 ```
 
-### Yang harus tersedia di server
+### Struktur akun FTP yang aman
 
-- SSH aktif untuk user cPanel, port 22 (atau custom).
-- `rsync` tersedia di server (`rsync --version`). CloudHost/LiteSpeed biasanya ada;
-  kalau tidak, minta support memasangnya.
-- Public key deploy di `~/.ssh/authorized_keys` (chmod 600) — **disarankan**
-  dibanding password.
-- Folder backend & frontend sudah dibuat dan docroot sudah menunjuk ke sana.
+Gunakan akun FTP scoped khusus agar tidak menyentuh seluruh akun hosting:
 
-### Isi di GitHub (Settings → Secrets and variables → Actions)
+- **Directory:** `/home/permatat/followtheline.id/jejaka500`
+- Akun ini melihat:
+  - `/` -> root docroot SPA
+  - `/api` -> root Laravel
 
-**Variables** (bukan rahasia):
+### Variabel & Secret GitHub Actions
 
-| Nama | Contoh |
-|---|---|
-| `CPANEL_HOST` | `api.jejaka500.id` |
-| `CPANEL_PORT` | `22` |
-| `CPANEL_USER` | `imamkoo` |
-| `CPANEL_BACKEND_PATH` | `/home/imamkoo/jejaka500` |
-| `CPANEL_FRONTEND_PATH` | `/home/imamkoo/jejaka500-web` |
-| `CPANEL_PHP_BIN` | `/opt/cpanel/ea-php84/root/usr/bin/php` |
-| `CPANEL_API_BASE_URL` | `https://api.jejaka500.id/api` |
-| `CPANEL_PUBLIC_URL` | `https://api.jejaka500.id` |
+**Settings → Secrets and variables → Actions**
+
+**Variables:**
+- `CPANEL_FTP_HOST`: `ftp.permatatourtravel.com` (atau `103.63.24.171`)
+- `CPANEL_FTP_PORT`: `21`
+- `CPANEL_FTP_USERNAME`: `jejaka-deploy@permatatourtravel.com`
+- `CPANEL_API_BASE_URL`: `https://jejaka500.followtheline.id/api` (opsional, default ini)
+- `CPANEL_PUBLIC_URL`: `https://jejaka500.followtheline.id` (opsional, default ini)
 
 **Secrets:**
+- `CPANEL_FTP_PASSWORD`: password akun FTP yang dibuat di cPanel (jangan simpan di chat/repo)
 
-| Nama | Isi |
-|---|---|
-| `CPANEL_SSH_KEY` | private key deploy (format OpenSSH, tanpa passphrase) |
-| `CPANEL_SSH_KNOWN_HOSTS` | output `ssh-keyscan -p 22 api.jejaka500.id` |
-| `CPANEL_PASSWORD` | alternatif bila key tidak bisa dipakai |
+### Urutan aktivasi yang aman
 
-Membuat keypair di lokal:
+Jangan isi nilai contoh di atas sebelum pemilik akun cPanel mengonfirmasi host, user FTP, dan document root yang benar. Buat akun FTP khusus deploy—jangan pakai password login utama cPanel—dan batasi direktori akunnya ke root yang memuat SPA serta folder `api/`. Pastikan kredensial tersebut hanya punya akses pada file yang memang dikelola workflow.
 
-```bash
-ssh-keygen -t ed25519 -C "github-actions-jejaka500" -f ~/.ssh/jejaka500_deploy -N ""
-ssh-keyscan -p 22 api.jejaka500.id
-# public key (~/.ssh/jejaka500_deploy.pub) -> tempel ke ~/.ssh/authorized_keys di server
-# private key (~/.ssh/jejaka500_deploy)    -> isi secret CPANEL_SSH_KEY
-```
+1. Di cPanel → **FTP Accounts**, buat user khusus deploy dengan directory yang disetujui pemilik hosting. Simpan password di password manager.
+2. Di GitHub repo → **Settings → Secrets and variables → Actions → Variables**, tambahkan `CPANEL_FTP_HOST`, `CPANEL_FTP_USERNAME`, dan `CPANEL_FTP_PORT` (`21`). Tambahkan `CPANEL_API_BASE_URL` dan `CPANEL_PUBLIC_URL` hanya bila domain berbeda dari nilai default workflow.
+3. Di tab **Secrets**, tambahkan `CPANEL_FTP_PASSWORD`. Jangan kirim password melalui chat, issue, commit, atau workflow log.
+4. Sebelum mengaktifkan workflow, verifikasi secara manual di cPanel bahwa FTP root menunjuk ke docroot SPA dan `api/` berada di root tersebut; docroot domain API tetap menunjuk ke direktori Laravel `public/`. Jangan beri akun deploy akses ke direktori lain atau home directory penuh.
+5. Jalankan **Actions → Deploy (cPanel via FTPS) → Run workflow** pada branch `main`, dengan `force_upload` tidak dicentang untuk uji awal. Job hanya akan jalan jika `CPANEL_FTP_HOST` tersedia; setelah kredensial lengkap, workflow melakukan build, upload, lalu smoke test.
+6. Pastikan log tidak menampilkan password dan smoke test `/up`, `/`, `/api/price-categories`, serta `/admin/login` berhasil. Bila upload berhasil tetapi smoke test gagal, hentikan deploy berikutnya dan periksa mapping direktori serta konfigurasi routing di cPanel.
 
-### Urutan aman pertama kali
+Workflow melakukan upload aditif tanpa menghapus file lama, tidak menjalankan migrasi database atau Artisan command, dan tidak mengubah `.env` server. Migrasi, cache Artisan, serta penghapusan file lama harus dilakukan manual lewat prosedur release yang disetujui. Mengisi variable host akan membuat deploy otomatis eligible pada CI sukses berikutnya di `main`.
 
-1. Isi Variables + secret. **Jangan** ubah DNS dulu.
-2. Actions → **Deploy (cPanel via SSH)** → *Run workflow* → centang **dry_run**.
-   Periksa daftar file yang akan dikirim; tidak ada perubahan di server.
-3. Jalankan lagi **tanpa** dry_run (sekali ini centang `skip_migrate` **tidak**
-   perlu; biarkan migrasi jalan agar skema terbentuk).
-4. Cek `https://api.jejaka500.id/up` dan `/admin/login`.
-5. Baru arahkan DNS/domain, lalu matikan Render/Vercel.
+### Proteksi keamanan bawaan script FTPS
 
-### Perilaku yang perlu diketahui
-
-- `.env` **tidak pernah** ditimpa (di-exclude), `storage/` juga tidak tersentuh —
-  foto aman.
-- `public/storage` (symlink) di-exclude agar tidak terhapus oleh `--delete`.
-- `db:seed` **tidak** dijalankan otomatis; hanya sekali di awal (manual).
-- `route:cache` tidak dipakai; cukup `config:cache` + `view:cache`.
-- Job otomatis di-skip selama `CPANEL_HOST` kosong, jadi workflow ini aman
-  di-merge sebelum hosting siap.
+- **Aditif (tanpa delete):** tidak menghapus file server yang ada.
+- **Incremental via content hash:** manifest hash SHA-256 (`.deploy-manifest-*.json`) disimpan di `/api/storage/app/private/` sehingga file yang ukurannya dan hash-nya cocok tidak diunggah ulang; push reguler hanya mengunggah file yang benar-benar berubah.
+- **Proteksi ketat:** `.env`, `.env.*`, `storage/`, `tests/`, `docker/`, `bootstrap/cache/config.php`, dan file `.htaccess` akar docroot di-exclude dari penimpaan. `backend/public/.htaccess` (rewrite controller Laravel) tetap ikut terunggah.
+- **Path traversal guard:** menolak `..`, path absolut, dan karakter kontrol (`\r`, `\n`).
 
 ## Lampiran A — Data lama dari Render
 
