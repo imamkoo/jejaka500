@@ -49,19 +49,15 @@ jobs:
     steps:
       - name: Preflight cPanel credentials
         env:
-          CPANEL_FTP_HOST: ${{ vars.CPANEL_FTP_HOST }}
-          CPANEL_FTP_USERNAME: ${{ vars.CPANEL_FTP_USERNAME }}
-          CPANEL_FTP_PASSWORD: ${{ secrets.CPANEL_FTP_PASSWORD }}
+          CPANEL_DEPLOY_TOKEN: ${{ secrets.CPANEL_DEPLOY_TOKEN }}
         run: |
           set -euo pipefail
-          missing=0
-          for name in CPANEL_FTP_HOST CPANEL_FTP_USERNAME CPANEL_FTP_PASSWORD; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::$name belum diisi di Settings -> Secrets and variables -> Actions"
-              missing=1
-            fi
-          done
-          exit "$missing"
+          if [ -z "${CPANEL_DEPLOY_TOKEN:-}" ]; then
+            echo "::error::CPANEL_DEPLOY_TOKEN belum diisi di Settings -> Secrets and variables -> Actions."
+            echo "Buat token di server lewat Terminal cPanel:"
+            echo "  php ~/followtheline.id/jejaka500/api/public/deploy-token.php"
+            exit 1
+          fi
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -83,7 +79,10 @@ jobs:
 
       - name: Install Composer dependencies (production)
         working-directory: backend
-        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+        run: |
+          composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+          # Dokumentasi vendor tidak dipakai saat runtime dan menambah ribuan file.
+          find vendor -type d -name docs -prune -exec rm -rf {} + 2>/dev/null || true
 
       - name: Install Node dependencies (backend assets)
         working-directory: backend
@@ -126,28 +125,30 @@ jobs:
 
       - name: Verify deployment and Service Worker tests
         run: |
-          python3 .github/scripts/test_ftps_deploy.py
+          python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
           node --test frontend/scripts/test-sw-denylist.mjs
 
-      - name: Deploy backend (FTPS -> /api)
-        env:
-          CPANEL_FTP_HOST: ${{ vars.CPANEL_FTP_HOST }}
-          CPANEL_FTP_PORT: ${{ vars.CPANEL_FTP_PORT || '21' }}
-          CPANEL_FTP_USERNAME: ${{ vars.CPANEL_FTP_USERNAME }}
-          CPANEL_FTP_PASSWORD: ${{ secrets.CPANEL_FTP_PASSWORD }}
-          FORCE_FLAG: ${{ github.event.inputs.force_upload == 'true' && '--force' || '' }}
+      - name: Package backend archive
         run: |
-          python3 .github/scripts/ftps_deploy.py backend /api /api/storage/app/private/.deploy-manifest-api.json $FORCE_FLAG
+          python3 .github/scripts/build_archive.py backend "$RUNNER_TEMP/backend.zip" "$RUNNER_TEMP/backend-manifest.json"
 
-      - name: Deploy frontend (FTPS -> /)
+      - name: Deploy backend (chunked HTTPS -> /api)
         env:
-          CPANEL_FTP_HOST: ${{ vars.CPANEL_FTP_HOST }}
-          CPANEL_FTP_PORT: ${{ vars.CPANEL_FTP_PORT || '21' }}
-          CPANEL_FTP_USERNAME: ${{ vars.CPANEL_FTP_USERNAME }}
-          CPANEL_FTP_PASSWORD: ${{ secrets.CPANEL_FTP_PASSWORD }}
-          FORCE_FLAG: ${{ github.event.inputs.force_upload == 'true' && '--force' || '' }}
+          CPANEL_DEPLOY_TOKEN: ${{ secrets.CPANEL_DEPLOY_TOKEN }}
+          CPANEL_DEPLOY_ENDPOINT: ${{ vars.CPANEL_DEPLOY_ENDPOINT || 'https://jejaka500.followtheline.id/api/deploy-extract.php' }}
         run: |
-          python3 .github/scripts/ftps_deploy.py frontend/dist / /api/storage/app/private/.deploy-manifest-spa.json $FORCE_FLAG
+          python3 .github/scripts/upload_chunks.py "$RUNNER_TEMP/backend-manifest.json"
+
+      - name: Package frontend archive
+        run: |
+          python3 .github/scripts/build_archive.py frontend/dist "$RUNNER_TEMP/spa.zip" "$RUNNER_TEMP/spa-manifest.json"
+
+      - name: Deploy frontend (chunked HTTPS -> /)
+        env:
+          CPANEL_DEPLOY_TOKEN: ${{ secrets.CPANEL_DEPLOY_TOKEN }}
+          CPANEL_DEPLOY_ENDPOINT: ${{ vars.CPANEL_DEPLOY_ENDPOINT || 'https://jejaka500.followtheline.id/api/deploy-extract.php' }}
+        run: |
+          python3 .github/scripts/upload_chunks.py "$RUNNER_TEMP/spa-manifest.json"
 
       - name: Smoke test
         run: |
