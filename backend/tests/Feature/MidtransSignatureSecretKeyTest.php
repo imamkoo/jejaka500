@@ -13,7 +13,7 @@ it('verifies signature using signature_secret_key when configured', function () 
     $grossAmount = '50000';
     $validSignature = hash('sha512', $orderId.$statusCode.$grossAmount.'secret-key-xyz');
 
-    $verifier = new NotificationSignatureVerifier();
+    $verifier = new NotificationSignatureVerifier;
 
     expect($verifier->isAuthentic([
         'order_id' => $orderId,
@@ -40,7 +40,7 @@ it('falls back to server_key when signature_secret_key is empty for legacy compa
     $grossAmount = '20000';
     $validLegacySignature = hash('sha512', $orderId.$statusCode.$grossAmount.'legacy-server-key-123');
 
-    $verifier = new NotificationSignatureVerifier();
+    $verifier = new NotificationSignatureVerifier;
 
     expect($verifier->isAuthentic([
         'order_id' => $orderId,
