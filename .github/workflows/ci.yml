@@ -163,3 +163,14 @@ jobs:
 
       - name: Build SPA
         run: pnpm run build
+
+  deploy-tooling:
+    name: Deploy Tooling Tests (Python)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Run deploy tooling tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
