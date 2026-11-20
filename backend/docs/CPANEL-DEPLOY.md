@@ -375,6 +375,19 @@ Gunakan akun FTP scoped khusus agar tidak menyentuh seluruh akun hosting:
 **Secrets:**
 - `CPANEL_FTP_PASSWORD`: password akun FTP yang dibuat di cPanel (jangan simpan di chat/repo)
 
+### Urutan aktivasi yang aman
+
+Jangan isi nilai contoh di atas sebelum pemilik akun cPanel mengonfirmasi host, user FTP, dan document root yang benar. Buat akun FTP khusus deploy—jangan pakai password login utama cPanel—dan batasi direktori akunnya ke root yang memuat SPA serta folder `api/`. Pastikan kredensial tersebut hanya punya akses pada file yang memang dikelola workflow.
+
+1. Di cPanel → **FTP Accounts**, buat user khusus deploy dengan directory yang disetujui pemilik hosting. Simpan password di password manager.
+2. Di GitHub repo → **Settings → Secrets and variables → Actions → Variables**, tambahkan `CPANEL_FTP_HOST`, `CPANEL_FTP_USERNAME`, dan `CPANEL_FTP_PORT` (`21`). Tambahkan `CPANEL_API_BASE_URL` dan `CPANEL_PUBLIC_URL` hanya bila domain berbeda dari nilai default workflow.
+3. Di tab **Secrets**, tambahkan `CPANEL_FTP_PASSWORD`. Jangan kirim password melalui chat, issue, commit, atau workflow log.
+4. Sebelum mengaktifkan workflow, verifikasi secara manual di cPanel bahwa FTP root menunjuk ke docroot SPA dan `api/` berada di root tersebut; docroot domain API tetap menunjuk ke direktori Laravel `public/`. Jangan beri akun deploy akses ke direktori lain atau home directory penuh.
+5. Jalankan **Actions → Deploy (cPanel via FTPS) → Run workflow** pada branch `main`, dengan `force_upload` tidak dicentang untuk uji awal. Job hanya akan jalan jika `CPANEL_FTP_HOST` tersedia; setelah kredensial lengkap, workflow melakukan build, upload, lalu smoke test.
+6. Pastikan log tidak menampilkan password dan smoke test `/up`, `/`, `/api/price-categories`, serta `/admin/login` berhasil. Bila upload berhasil tetapi smoke test gagal, hentikan deploy berikutnya dan periksa mapping direktori serta konfigurasi routing di cPanel.
+
+Workflow melakukan upload aditif tanpa menghapus file lama, tidak menjalankan migrasi database atau Artisan command, dan tidak mengubah `.env` server. Migrasi, cache Artisan, serta penghapusan file lama harus dilakukan manual lewat prosedur release yang disetujui. Mengisi variable host akan membuat deploy otomatis eligible pada CI sukses berikutnya di `main`.
+
 ### Proteksi keamanan bawaan script FTPS
 
 - **Aditif (tanpa delete):** tidak menghapus file server yang ada.

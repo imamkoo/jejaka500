@@ -40,7 +40,12 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        navigateFallbackDenylist: [
+          /^\/api(\/|$)/,
+          /^\/admin(\/|$)/,
+          /^\/livewire(\/|$)/,
+          /^\/up$/,
+        ],
         // Gambar tidak di-precache saat install; di-cache on-demand lewat runtimeCaching.
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],
         globIgnores: ['**/icons/icon-1024.png'],

@@ -124,8 +124,10 @@ jobs:
           VITE_API_URL: ${{ env.API_BASE_URL }}
         run: pnpm run build
 
-      - name: Verify script unit tests
-        run: python3 .github/scripts/test_ftps_deploy.py
+      - name: Verify deployment and Service Worker tests
+        run: |
+          python3 .github/scripts/test_ftps_deploy.py
+          node --test frontend/scripts/test-sw-denylist.mjs
 
       - name: Deploy backend (FTPS -> /api)
         env:
