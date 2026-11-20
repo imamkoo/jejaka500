@@ -18,6 +18,7 @@ from build_archive import (
     build_archive,
     chunk_archive,
     DEFAULT_CHUNK_BYTES,
+    SERVER_UPLOAD_LIMIT_BYTES,
 )
 
 
@@ -26,6 +27,35 @@ class ChunkingTests(unittest.TestCase):
         # PHP menolak body melebihi 8 MiB; sisakan ruang untuk overhead multipart.
         self.assertLess(DEFAULT_CHUNK_BYTES, 8 * 1024 * 1024)
         self.assertGreaterEqual(DEFAULT_CHUNK_BYTES, 1 * 1024 * 1024)
+
+    def test_chunks_fit_the_measured_upload_max_filesize(self):
+        """Server terukur memakai `upload_max_filesize=2M`, bukan 8M.
+
+        `php -i` di cPanel melaporkan `upload_max_filesize => 2M` dan
+        `post_max_size => 8M` (LiteSpeed mengabaikan `.user.ini`). Sebuah
+        potongan 4 MiB akan ditolak `413`/`UPLOAD_ERR_INI_SIZE` pada potongan
+        pertama, jadi ukuran potongan wajib berada di bawah 2 MiB.
+        """
+        self.assertLessEqual(DEFAULT_CHUNK_BYTES, 2 * 1024 * 1024)
+        # Beri ruang untuk overhead multipart dan header tanda tangan.
+        self.assertLessEqual(
+            DEFAULT_CHUNK_BYTES + 64 * 1024,
+            SERVER_UPLOAD_LIMIT_BYTES,
+            "chunk + overhead multipart harus muat di upload_max_filesize server",
+        )
+
+    def test_archive_chunks_stay_under_upload_limit(self):
+        """Setiap potongan nyata harus muat, termasuk yang terakhir."""
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "payload.bin"
+            source.write_bytes(b"z" * (5 * 1024 * 1024))
+
+            chunks = chunk_archive(source, Path(temp_dir))
+
+            self.assertGreater(len(chunks), 1)
+            for chunk in chunks:
+                with self.subTest(index=chunk["index"]):
+                    self.assertLessEqual(chunk["size"], SERVER_UPLOAD_LIMIT_BYTES)
 
     def test_splits_archive_and_keeps_byte_order(self):
         with TemporaryDirectory() as temp_dir:
@@ -154,62 +184,57 @@ class BuildArchiveTests(unittest.TestCase):
 class ExtractEndpointContractTests(unittest.TestCase):
     """Kontrak yang harus dipenuhi endpoint PHP di server."""
 
-    def test_public_assets_land_in_docroot_and_code_lands_above_it(self):
-        source = (
-            Path(__file__).resolve().parents[2] / "backend" / "public" / "deploy-extract.php"
-        ).read_text()
+    def setUp(self):
+        backend = Path(__file__).resolve().parents[2] / "backend"
+        self.lib = (backend / "deploy-cpanel" / "deploy-lib.php").read_text()
+        self.handler = (backend / "deploy-cpanel" / "cpanel-deploy-handler.php").read_text()
 
+    def test_public_assets_land_in_docroot_and_code_lands_above_it(self):
         # Lawan `rsync backend/ -> /api`: `/api` adalah app root Laravel, docroot
         # adalah `/api/public`. Jadi arsip tanpa prefiks mendarat di app root, dan
         # `public/*` dipetakan ke docroot `public/` (mempertahankan `.htaccess`
         # Laravel). Front controller `public/index.php` TIDAK boleh menjadi
         # `index.php` di app root karena akan menimpa SPA.
-        self.assertIn("PUBLIC_PREFIX", source)
-        self.assertIn("APP_ROOT_DIR", source)
-        self.assertIn("strlen(PUBLIC_PREFIX)", source)
-        self.assertIn("substr(", source)
+        self.assertIn("PUBLIC_PREFIX", self.lib)
+        self.assertIn("strlen(PUBLIC_PREFIX)", self.lib)
+        self.assertIn("substr(", self.lib)
 
         # Jangan pernah menulis index.php di app root.
-        self.assertNotIn(
-            "APP_ROOT_DIR.'/index.php'",
-            source,
-            "index.php di app root akan menimpa front controller SPA",
-        )
-        # Helper deploy tidak boleh menimpa dirinya sendiri.
-        self.assertIn("'public/deploy-extract.php'", source)
+        self.assertNotIn("'/index.php'", self.handler + self.lib)
+        # Handler tidak boleh menimpa dirinya sendiri.
+        self.assertIn("'public/cpanel-deploy.php'", self.lib)
 
-    def test_endpoint_source_rejects_path_traversal_and_requires_signature(self):
-        endpoint = Path(__file__).resolve().parents[2] / "backend" / "public" / "deploy-extract.php"
-        self.assertTrue(endpoint.is_file(), "backend/public/deploy-extract.php harus ada")
-
-        source = endpoint.read_text()
-        secret_generator = endpoint.with_name("deploy-secret.php").read_text()
-
-        self.assertIn("hash_hmac", source, "autentikasi memakai HMAC")
-        self.assertIn("hash_equals", source, "tanda tangan dibandingkan constant-time")
-        self.assertIn("random_bytes", secret_generator, "secret harus acak")
-        self.assertIn("__DIR__", source, "target harus relatif terhadap direktori endpoint")
-        self.assertIn("unlink", source, "penanda nonce wajib dibersihkan")
-        self.assertIn("ZipArchive", source)
-        self.assertNotIn("shell_exec", source)
-        self.assertNotIn("exec(", source)
-        # Server menolak body >8 MiB, jadi endpoint harus menerima potongan.
-        self.assertIn("MAX_CHUNK_BYTES", source)
-        self.assertIn("move_uploaded_file", source)
+    def test_endpoint_rejects_path_traversal_and_requires_signature(self):
+        self.assertIn("hash_hmac", self.lib, "autentikasi memakai HMAC")
+        self.assertIn("hash_equals", self.lib, "tanda tangan dibandingkan constant-time")
+        self.assertIn("random_bytes", self.handler, "secret harus acak")
+        self.assertIn("__DIR__", self.handler, "target harus relatif terhadap handler")
+        self.assertIn("unlink", self.lib, "penanda nonce wajib dibersihkan")
+        self.assertIn("ZipArchive", self.handler)
+        self.assertNotIn("shell_exec", self.handler)
+        self.assertNotIn("eval(", self.handler)
+        # Server menolak potongan >2 MiB, jadi endpoint harus menerima potongan.
+        self.assertIn("MAX_CHUNK_BYTES", self.handler)
+        self.assertIn("move_uploaded_file", self.handler)
         # Token statis sudah digantikan tanda tangan; jangan kembali ke sana.
-        self.assertNotIn("X-Deploy-Token", source)
+        self.assertNotIn("X-Deploy-Token", self.handler)
+
+    def test_handler_refuses_to_run_over_http_when_not_configured(self):
+        # Handler harus hidup di luar docroot dan tidak pernah tampil sebagai
+        # berkas yang dieksekusi langsung.
+        self.assertIn("PHP_SAPI === 'cli'", self.handler)
+        self.assertIn("--generate-secret", self.handler)
 
     def test_endpoint_rejects_entries_escaping_target_directory(self):
-        source = (
-            Path(__file__).resolve().parents[2] / "backend" / "public" / "deploy-extract.php"
-        ).read_text()
         # Normalisasi entri arsip sebelum ditulis ke disk.
-        self.assertIn("str_contains($normalized, '..')", source)
-        self.assertIn("str_starts_with($normalized, '/')", source)
-        # Validasi harus terjadi sebelum loop penulisan.
+        self.assertIn("str_contains($normalized, '..')", self.lib)
+        self.assertIn("str_starts_with($normalized, '/')", self.lib)
+        # Handler wajib memakai validasi itu, dan validasi harus mendahului
+        # penulisan ekstraksi (bukan penulisan secret di `generate_secret`).
+        self.assertIn("resolve_destination($normalized", self.handler)
         self.assertLess(
-            source.index("str_contains($normalized, '..')"),
-            source.index("file_put_contents"),
+            self.handler.index("resolve_destination($normalized"),
+            self.handler.index("$zip->getStream("),
             "validasi entri harus mendahului penulisan file",
         )
 

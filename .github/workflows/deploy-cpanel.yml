@@ -1,8 +1,10 @@
-name: Deploy (cPanel via FTPS)
+name: Deploy (cPanel via arsip bertahap)
 
 # Deploy otomatis ke cPanel setiap CI di `main` selesai sukses.
-# Memakai explicit FTPS (TLS port 21) dan upload aditif tanpa flag delete,
-# sehingga file .env, folder storage, dan aturan routing .htaccess yang ada di server tetap aman.
+# Mengirim arsip ZIP bertahap lewat HTTPS ke endpoint ber-HMAC (lihat
+# `backend/docs/CPANEL-DEPLOY-ARCHIVE.md`). Tidak ada flag delete, sehingga
+# `.env`, folder storage, dan `.htaccess` milik server tetap aman.
+# Job hanya berjalan setelah `vars.CPANEL_DEPLOY_READY=true`.
 
 on:
   workflow_run:
@@ -57,10 +59,34 @@ jobs:
           set -euo pipefail
           if [ -z "${CPANEL_DEPLOY_SECRET:-}" ]; then
             echo "::error::CPANEL_DEPLOY_SECRET belum diisi di Settings -> Secrets and variables -> Actions."
-            echo "Buat secret di server lewat Terminal cPanel (sekali saja):"
-            echo "  php ~/followtheline.id/jejaka500/api/public/deploy-secret.php"
+            echo "Pasang endpoint dulu (sekali saja, lihat backend/docs/CPANEL-DEPLOY-ARCHIVE.md):"
+            echo "  mkdir -p ~/followtheline.id/jejaka500/api/storage/cpanel-deploy"
+            echo "  # unggah cpanel-deploy-handler.php + deploy-lib.php ke folder itu"
+            echo "  php ~/followtheline.id/jejaka500/api/storage/cpanel-deploy/cpanel-deploy-handler.php --generate-secret"
+            echo "  cp cpanel-deploy.php ~/followtheline.id/jejaka500/api/public/cpanel-deploy.php"
             exit 1
           fi
+
+      - name: Preflight deploy endpoint
+        env:
+          ENDPOINT: ${{ vars.CPANEL_DEPLOY_ENDPOINT || 'https://jejaka500.followtheline.id/api/public/cpanel-deploy.php' }}
+        run: |
+          set -euo pipefail
+          # Endpoint harus MENOLAK tanpa tanda tangan: 405 untuk GET dan 403
+          # untuk POST. Status 404 berarti berkas tidak ada di server (deploy
+          # akan gagal setelah build 2 menit), 200 berarti endpoint tidak
+          # terpasang dan request jatuh ke halaman lain.
+          get_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$ENDPOINT" || true)
+          post_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$ENDPOINT" || true)
+          echo "endpoint: GET=$get_code POST=$post_code"
+
+          if [ "$get_code" = "405" ] && [ "$post_code" = "403" ]; then
+            exit 0
+          fi
+
+          echo "::error::$ENDPOINT tidak dalam kondisi siap (GET=$get_code, POST=$post_code; harap 405/403)."
+          echo "Pasang/recover endpoint di server: lihat backend/docs/CPANEL-DEPLOY-ARCHIVE.md"
+          exit 1
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -142,7 +168,7 @@ jobs:
       - name: Deploy backend (chunked HTTPS -> /api)
         env:
           CPANEL_DEPLOY_SECRET: ${{ secrets.CPANEL_DEPLOY_SECRET }}
-          CPANEL_DEPLOY_ENDPOINT: ${{ vars.CPANEL_DEPLOY_ENDPOINT || 'https://jejaka500.followtheline.id/api/deploy-extract.php' }}
+          CPANEL_DEPLOY_ENDPOINT: ${{ vars.CPANEL_DEPLOY_ENDPOINT || 'https://jejaka500.followtheline.id/api/public/cpanel-deploy.php' }}
         run: |
           python3 .github/scripts/upload_chunks.py "$RUNNER_TEMP/backend-manifest.json"
 
@@ -153,7 +179,7 @@ jobs:
       - name: Deploy frontend (chunked HTTPS -> /)
         env:
           CPANEL_DEPLOY_SECRET: ${{ secrets.CPANEL_DEPLOY_SECRET }}
-          CPANEL_DEPLOY_ENDPOINT: ${{ vars.CPANEL_DEPLOY_ENDPOINT || 'https://jejaka500.followtheline.id/api/deploy-extract.php' }}
+          CPANEL_DEPLOY_ENDPOINT: ${{ vars.CPANEL_DEPLOY_ENDPOINT || 'https://jejaka500.followtheline.id/api/public/cpanel-deploy.php' }}
         run: |
           python3 .github/scripts/upload_chunks.py "$RUNNER_TEMP/spa-manifest.json"
 

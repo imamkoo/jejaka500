@@ -1,0 +1,96 @@
+# BEGIN cPanel-generated php ini directives
+<IfModule php8_module>
+   php_value error_log "/home/permatat/logs/php.error.log"
+   php_flag log_errors On
+</IfModule>
+<IfModule lsapi_module>
+   php_value error_log "/home/permatat/logs/php.error.log"
+   php_flag log_errors On
+</IfModule>
+# END cPanel-generated php ini directives
+
+# Pilih PHP 8.4 untuk file PHP
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php84 .php .php8 .phtml
+</IfModule>
+
+Options -MultiViews -Indexes
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # --- Kunci akses langsung ke helper deploy di dalam api/ ---
+    # Terukur 2026-11-20: `/api/public/robots.txt` dilayani sebagai BERKAS
+    # (ada `last-modified`, 24 byte), jadi `^api(/.*)?$` di bawah TIDAK
+    # menangkap `/api/public/...`. Akibatnya setiap `.php` di `api/public/`
+    # adalah endpoint publik — termasuk helper deploy lama. Itu alasannya
+    # handler asli dipindah ke `api/storage/` (di luar docroot).
+    #
+    # Satu-satunya berkas yang boleh dieksekusi di sana adalah shim yang
+    # menandatangani request, dan shim itu sendiri hanya memuat handler.
+    RewriteRule ^api/public/cpanel-deploy\.php$ - [L]
+    RewriteRule ^api/(public/)?deploy- [F,L]
+
+    # --- Tolak berkas rahasia di dalam api/ ---
+    RewriteRule ^api/(\.env(\..*)?|\.git/.*|composer\.(json|lock)|artisan)$ [F,L]
+
+    # --- Rute Laravel ---
+    # Catatan terukur 2026-11-20: `/css/...`, `/js/...`, `/up`, `/admin/login`
+    # sudah berfungsi apa adanya (diverifikasi `content-type` CSS/JS asli, bukan
+    # fallback SPA). Aturan tambahan untuk aset top-level TIDAK diperlukan dan
+    # tidak ditambahkan — mengubah routing yang sudah bekerja berisiko mematikan
+    # situs tanpa manfaat.
+    #
+    # `^api(/.*)?$` juga menangkap `/api/public/...`, sehingga berkas apa pun di
+    # `api/public/` yang diminta lewat `/api/public/<nama>` dilayani Laravel dan
+    # bukan sebagai berkas fisik — kecuali ditangani `[F,L]` di atas.
+    RewriteRule ^api(/.*)?$      api/public/index.php [L,QSA]
+    RewriteRule ^admin(/.*)?$    api/public/index.php [L,QSA]
+    RewriteRule ^livewire(/.*)?$ api/public/index.php [L,QSA]
+    RewriteRule ^up$             api/public/index.php [L,QSA]
+
+    # --- Berkas/folder yang benar-benar ada dilayani langsung ---
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # --- Aset SPA yang tidak ada tetap 404 ---
+    RewriteCond %{REQUEST_URI} \.[a-zA-Z0-9]{1,8}$
+    RewriteRule ^ - [L,R=404]
+
+    # --- Fallback SPA ---
+    RewriteRule ^ index.html [L]
+</IfModule>
+
+# --- Tolak berkas titik, kecuali tantangan ACME ---
+<IfModule mod_authz_core.c>
+    # Jangan membocorkan `.env`, `.git`, dan cadangan `.htaccess.bak.*`
+    <FilesMatch "^\.(env|git|htaccess\.bak|ftpquota)">
+        Require all denied
+    </FilesMatch>
+    <FilesMatch "^\.user\.ini$">
+        Require all denied
+    </FilesMatch>
+    # `/\.well-known/acme-challenge/` harus tetap terbuka untuk perpanjangan TLS.
+    <If "%{REQUEST_URI} =~ m#^/\.well-known/#">
+        Require all granted
+    </If>
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set X-Frame-Options "DENY"
+
+    <FilesMatch "^(index\.html|sw\.js|manifest\.webmanifest)$">
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+    </FilesMatch>
+</IfModule>
+
+# php -- BEGIN cPanel-generated handler, do not edit
+# Set the “ea-php84” package as the default “PHP” programming language.
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php84 .php .php8 .phtml
+</IfModule>
+# php -- END cPanel-generated handler, do not edit
