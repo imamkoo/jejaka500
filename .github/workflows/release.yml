@@ -109,7 +109,7 @@ jobs:
           ls -lh "$GITHUB_WORKSPACE"/jejaka500-backend-*.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jejaka500-backend
           path: jejaka500-backend-*.zip
@@ -164,7 +164,7 @@ jobs:
           ls -lh "$GITHUB_WORKSPACE"/jejaka500-frontend-*.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jejaka500-frontend
           path: jejaka500-frontend-*.zip
@@ -178,13 +178,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: assets
           merge-multiple: true
 
       - name: Publish release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: assets/*.zip
           generate_release_notes: true
