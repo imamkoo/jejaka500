@@ -378,7 +378,8 @@ Gunakan akun FTP scoped khusus agar tidak menyentuh seluruh akun hosting:
 ### Proteksi keamanan bawaan script FTPS
 
 - **Aditif (tanpa delete):** tidak menghapus file server yang ada.
-- **Proteksi ketat:** `.env`, `.env.*`, `storage/`, `tests/`, `docker/`, dan file `.htaccess` di-exclude dari penimpaan langsung.
+- **Incremental via content hash:** manifest hash SHA-256 (`.deploy-manifest-*.json`) disimpan di `/api/storage/app/private/` sehingga file yang ukurannya dan hash-nya cocok tidak diunggah ulang; push reguler hanya mengunggah file yang benar-benar berubah.
+- **Proteksi ketat:** `.env`, `.env.*`, `storage/`, `tests/`, `docker/`, `bootstrap/cache/config.php`, dan file `.htaccess` akar docroot di-exclude dari penimpaan. `backend/public/.htaccess` (rewrite controller Laravel) tetap ikut terunggah.
 - **Path traversal guard:** menolak `..`, path absolut, dan karakter kontrol (`\r`, `\n`).
 
 ## Lampiran A — Data lama dari Render

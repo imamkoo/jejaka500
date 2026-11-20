@@ -135,15 +135,19 @@ Variables `CPANEL_FTP_HOST=ftp.permatatourtravel.com`, `CPANEL_FTP_PORT=21`, dan
 di Secret `CPANEL_FTP_PASSWORD`.
 
 Upload bersifat aditif dan tidak menghapus file di server. `.env`, `storage/`,
-dan `.htaccess` tidak ditimpa. Workflow tidak menjalankan Artisan karena FTP
-bukan shell: perubahan yang memerlukan migrasi database, `config:cache`, atau
-perubahan routing memerlukan langkah terpisah di cPanel.
+dan `.htaccess` akar docroot tidak ditimpa; `.htaccess` bawaan Laravel di
+`api/public/` ikut diperbarui. Manifest hash di `/api/storage/app/private/` membuat file
+yang tidak berubah dilewati setelah deploy pertama. Workflow tidak menjalankan
+Artisan karena FTP bukan shell: perubahan yang memerlukan migrasi database,
+`config:cache`, atau perubahan routing memerlukan langkah terpisah di cPanel.
 
 ### 8b. Jalur manual
 
-ZIP Release tetap bisa dipakai untuk pemulihan atau upload manual. Setelah
-perubahan yang memerlukan migrasi/config, admin menjalankan perintah Artisan
-melalui cPanel Terminal atau cron sekali-jalan.
+ZIP Release tetap bisa dipakai untuk pemulihan atau upload manual. Bila file
+server diubah di luar workflow, jalankan `workflow_dispatch` dengan input
+`force_upload=true` agar semua file sumber diunggah ulang. Setelah perubahan
+yang memerlukan migrasi/config, admin menjalankan perintah Artisan melalui
+cPanel Terminal atau cron sekali-jalan.
 
 ---
 
