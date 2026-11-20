@@ -178,23 +178,26 @@ class ExtractEndpointContractTests(unittest.TestCase):
         # Helper deploy tidak boleh menimpa dirinya sendiri.
         self.assertIn("'public/deploy-extract.php'", source)
 
-    def test_endpoint_source_rejects_path_traversal_and_requires_token(self):
+    def test_endpoint_source_rejects_path_traversal_and_requires_signature(self):
         endpoint = Path(__file__).resolve().parents[2] / "backend" / "public" / "deploy-extract.php"
         self.assertTrue(endpoint.is_file(), "backend/public/deploy-extract.php harus ada")
 
         source = endpoint.read_text()
-        token_generator = endpoint.with_name("deploy-token.php").read_text()
+        secret_generator = endpoint.with_name("deploy-secret.php").read_text()
 
-        self.assertIn("hash_equals", source, "token harus dibandingkan constant-time")
-        self.assertIn("random_bytes", token_generator, "token harus acak per-run")
+        self.assertIn("hash_hmac", source, "autentikasi memakai HMAC")
+        self.assertIn("hash_equals", source, "tanda tangan dibandingkan constant-time")
+        self.assertIn("random_bytes", secret_generator, "secret harus acak")
         self.assertIn("__DIR__", source, "target harus relatif terhadap direktori endpoint")
-        self.assertIn("unlink", source, "endpoint wajib menghapus dirinya/token setelah dipakai")
+        self.assertIn("unlink", source, "penanda nonce wajib dibersihkan")
         self.assertIn("ZipArchive", source)
         self.assertNotIn("shell_exec", source)
         self.assertNotIn("exec(", source)
         # Server menolak body >8 MiB, jadi endpoint harus menerima potongan.
         self.assertIn("MAX_CHUNK_BYTES", source)
         self.assertIn("move_uploaded_file", source)
+        # Token statis sudah digantikan tanda tangan; jangan kembali ke sana.
+        self.assertNotIn("X-Deploy-Token", source)
 
     def test_endpoint_rejects_entries_escaping_target_directory(self):
         source = (

@@ -14,8 +14,11 @@
  *   /api/                       seluruh kode    (app/, vendor/, artisan, routes/, ...)
  *
  * Keamanan:
- * - Token sekali pakai di `storage/framework/deploy-token.txt` (di luar docroot),
- *   dibuat lewat Terminal dengan `deploy-token.php`.
+ * - Autentikasi HMAC: setiap request membawa timestamp, nonce, dan tanda tangan
+ *   `hmac_sha256(secret, timestamp:nonce:archive_sha256)`. Secret dibaca dari
+ *   `storage/framework/deploy-secret.txt` (di luar docroot) dan tidak pernah
+ *   melintas jaringan.
+ * - Timestamp di luar jendela waktu ditolak; nonce yang sudah dipakai ditolak.
  * - Setiap entri arsip divalidasi sebelum satu file pun ditulis.
  * - `.env`, `storage/`, `bootstrap/cache/config.php`, dan helper deploy sendiri
  *   tidak pernah ditimpa.
@@ -28,8 +31,12 @@ declare(strict_types=1);
 // di atasnya.
 const APP_ROOT_DIR = __DIR__.'/..';
 const PUBLIC_DIR = __DIR__;
-const DEPLOY_TOKEN_FILE = APP_ROOT_DIR.'/storage/framework/deploy-token.txt';
+const DEPLOY_SECRET_FILE = APP_ROOT_DIR.'/storage/framework/deploy-secret.txt';
+const DEPLOY_NONCE_DIR = APP_ROOT_DIR.'/storage/framework/deploy-nonces';
 const DEPLOY_STAGING_DIR = APP_ROOT_DIR.'/storage/framework/deploy-staging';
+
+// Toleransi clock skew antara server dan runner GitHub.
+const SIGNATURE_WINDOW_SECONDS = 600;
 
 const PUBLIC_PREFIX = 'public/';
 const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
@@ -46,7 +53,7 @@ const FORBIDDEN_PATHS = [
 // endpoint yang sedang dipakai.
 const FORBIDDEN_EXACT = [
     'public/deploy-extract.php',
-    'public/deploy-token.php',
+    'public/deploy-secret.php',
 ];
 
 function respond(int $status, string $message): never
@@ -108,17 +115,88 @@ function resolve_destination(string $normalized): ?array
     return [APP_ROOT_DIR, $normalized];
 }
 
+/**
+ * Verifikasi tanda tangan HMAC.
+ *
+ * @param  string|null  $nonceDir  Direktori penanda nonce; null = lokasi produksi.
+ * @return array{ok: bool, reason: string}
+ */
+function verify_signature(
+    string $secret,
+    string $timestamp,
+    string $nonce,
+    string $archiveSha,
+    string $signature,
+    ?int $now = null,
+    ?string $nonceDir = null
+): array {
+    if ($secret === '') {
+        return ['ok' => false, 'reason' => 'server secret missing'];
+    }
+    if ($signature === '' || $nonce === '' || $timestamp === '') {
+        return ['ok' => false, 'reason' => 'missing signature'];
+    }
+    if (! ctype_digit($timestamp)) {
+        return ['ok' => false, 'reason' => 'bad timestamp'];
+    }
+
+    $now = $now ?? time();
+    if (abs($now - (int) $timestamp) > SIGNATURE_WINDOW_SECONDS) {
+        return ['ok' => false, 'reason' => 'expired'];
+    }
+
+    $expected = hash_hmac('sha256', $timestamp.':'.$nonce.':'.$archiveSha, $secret);
+    if (! hash_equals($expected, strtolower($signature))) {
+        return ['ok' => false, 'reason' => 'bad signature'];
+    }
+
+    $nonceDir = $nonceDir ?? DEPLOY_NONCE_DIR;
+
+    // Nonce sekali pakai: replay dalam jendela waktu tetap ditolak meski
+    // tanda tangan sah. File penanda berumur sama dengan jendela waktu.
+    if (! is_dir($nonceDir)
+        && ! mkdir($nonceDir, 0o700, true)
+        && ! is_dir($nonceDir)) {
+        return ['ok' => false, 'reason' => 'nonce store unavailable'];
+    }
+
+    foreach (glob($nonceDir.'/*') ?: [] as $stale) {
+        if (is_file($stale) && filemtime($stale) < $now - SIGNATURE_WINDOW_SECONDS * 2) {
+            @unlink($stale);
+        }
+    }
+
+    $marker = $nonceDir.'/'.hash('sha256', $nonce);
+    // `x` gagal bila file sudah ada -> atomik, tanpa race antar request paralel.
+    $handle = @fopen($marker, 'x');
+    if ($handle === false) {
+        return ['ok' => false, 'reason' => 'replayed nonce'];
+    }
+    fclose($handle);
+    @chmod($marker, 0o600);
+
+    return ['ok' => true, 'reason' => 'ok'];
+}
+
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     respond(405, 'POST required');
 }
 
-$providedToken = (string) ($_SERVER['HTTP_X_DEPLOY_TOKEN'] ?? '');
-if ($providedToken === '' || ! is_file(DEPLOY_TOKEN_FILE)) {
-    respond(403, 'Forbidden');
-}
+$secret = is_file(DEPLOY_SECRET_FILE)
+    ? trim((string) file_get_contents(DEPLOY_SECRET_FILE))
+    : '';
 
-$expectedToken = trim((string) file_get_contents(DEPLOY_TOKEN_FILE));
-if ($expectedToken === '' || ! hash_equals($expectedToken, $providedToken)) {
+$archiveShaHeader = strtolower((string) ($_SERVER['HTTP_X_DEPLOY_SHA256'] ?? ''));
+$verification = verify_signature(
+    $secret,
+    (string) ($_SERVER['HTTP_X_DEPLOY_TIMESTAMP'] ?? ''),
+    (string) ($_SERVER['HTTP_X_DEPLOY_NONCE'] ?? ''),
+    $archiveShaHeader,
+    (string) ($_SERVER['HTTP_X_DEPLOY_SIGNATURE'] ?? '')
+);
+
+if (! $verification['ok']) {
+    error_log('[deploy-extract] auth ditolak: '.$verification['reason']);
     respond(403, 'Forbidden');
 }
 
@@ -268,9 +346,6 @@ foreach ($plan as [$entry, $destination]) {
 
 $zip->close();
 remove_directory(DEPLOY_STAGING_DIR);
-
-// Token sekali pakai: habis setelah ekstraksi sukses.
-@unlink(DEPLOY_TOKEN_FILE);
 
 respond(200, sprintf(
     'OK extracted=%d written=%d archive_bytes=%d sha256=%s',

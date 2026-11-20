@@ -50,15 +50,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Preflight deploy token
+      - name: Preflight deploy secret
         env:
-          CPANEL_DEPLOY_TOKEN: ${{ secrets.CPANEL_DEPLOY_TOKEN }}
+          CPANEL_DEPLOY_SECRET: ${{ secrets.CPANEL_DEPLOY_SECRET }}
         run: |
           set -euo pipefail
-          if [ -z "${CPANEL_DEPLOY_TOKEN:-}" ]; then
-            echo "::error::CPANEL_DEPLOY_TOKEN belum diisi di Settings -> Secrets and variables -> Actions."
-            echo "Buat token di server lewat Terminal cPanel:"
-            echo "  php ~/followtheline.id/jejaka500/api/public/deploy-token.php"
+          if [ -z "${CPANEL_DEPLOY_SECRET:-}" ]; then
+            echo "::error::CPANEL_DEPLOY_SECRET belum diisi di Settings -> Secrets and variables -> Actions."
+            echo "Buat secret di server lewat Terminal cPanel (sekali saja):"
+            echo "  php ~/followtheline.id/jejaka500/api/public/deploy-secret.php"
             exit 1
           fi
 
@@ -141,7 +141,7 @@ jobs:
 
       - name: Deploy backend (chunked HTTPS -> /api)
         env:
-          CPANEL_DEPLOY_TOKEN: ${{ secrets.CPANEL_DEPLOY_TOKEN }}
+          CPANEL_DEPLOY_SECRET: ${{ secrets.CPANEL_DEPLOY_SECRET }}
           CPANEL_DEPLOY_ENDPOINT: ${{ vars.CPANEL_DEPLOY_ENDPOINT || 'https://jejaka500.followtheline.id/api/deploy-extract.php' }}
         run: |
           python3 .github/scripts/upload_chunks.py "$RUNNER_TEMP/backend-manifest.json"
@@ -152,7 +152,7 @@ jobs:
 
       - name: Deploy frontend (chunked HTTPS -> /)
         env:
-          CPANEL_DEPLOY_TOKEN: ${{ secrets.CPANEL_DEPLOY_TOKEN }}
+          CPANEL_DEPLOY_SECRET: ${{ secrets.CPANEL_DEPLOY_SECRET }}
           CPANEL_DEPLOY_ENDPOINT: ${{ vars.CPANEL_DEPLOY_ENDPOINT || 'https://jejaka500.followtheline.id/api/deploy-extract.php' }}
         run: |
           python3 .github/scripts/upload_chunks.py "$RUNNER_TEMP/spa-manifest.json"
