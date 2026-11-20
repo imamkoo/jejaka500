@@ -32,11 +32,11 @@ env:
 jobs:
   deploy:
     name: Build & deploy ke cPanel (arsip bertahap)
-    # Job hanya berjalan bila prasyarat server sudah siap. Bila token belum ada,
-    # job di-skip (bukan gagal) supaya push ke main tidak memunculkan CI merah
-    # padahal tidak ada yang rusak.
+    # Job hanya berjalan bila prasyarat server sudah siap. Penanda sengaja
+    # memakai `vars`, bukan `secrets`: context `secrets` tidak tersedia di
+    # `jobs.<id>.if`. Token sendiri tetap dikirim lewat env di step.
     if: |
-      secrets.CPANEL_DEPLOY_TOKEN != '' && (
+      vars.CPANEL_DEPLOY_READY == 'true' && (
         (
           github.event_name == 'workflow_run' &&
           github.event.workflow_run.event == 'push' &&
