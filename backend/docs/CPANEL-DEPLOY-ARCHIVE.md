@@ -61,22 +61,27 @@ chmod 755 ~/followtheline.id/jejaka500/storage/framework
 Ambil dari repo pada commit yang sedang live (folder `backend/public/`):
 
 - `deploy-extract.php`
-- `deploy-token.php`
+- `deploy-secret.php`
 
 Letakkan di `~/followtheline.id/jejaka500/api/`. Karena file ini di-track git,
 deploy berikutnya akan memperbaruinya otomatis.
 
-### 3. Buat token deploy
+### 3. Buat secret deploy (sekali saja)
 
 ```bash
-php ~/followtheline.id/jejaka500/api/public/deploy-token.php
+php ~/followtheline.id/jejaka500/api/public/deploy-secret.php
 ```
 
-Perintah mencetak satu baris token 64 karakter heksadesimal dan menyimpannya di
-`storage/framework/deploy-token.txt` (di luar docroot, tidak bisa diakses web).
+Perintah mencetak satu baris secret 64 karakter heksadesimal dan menyimpannya di
+`storage/framework/deploy-secret.txt` (di luar docroot, tidak bisa diakses web).
 
-Simpan output itu sebagai **secret** `CPANEL_DEPLOY_TOKEN` di
+Simpan output itu sebagai **secret** `CPANEL_DEPLOY_SECRET` di
 `Settings → Secrets and variables → Actions`.
+
+### 3b. Aktifkan deploy
+
+Isi **variable** `CPANEL_DEPLOY_READY` = `true`. Sebelum ini diisi, job deploy
+di-skip (bukan gagal), jadi push ke `main` tidak memunculkan CI merah.
 
 ### 4. Pastikan batas upload PHP cukup
 
@@ -105,21 +110,40 @@ php -r 'var_dump(class_exists("ZipArchive"));'
 Harus `true`. Bila `false`, aktifkan ekstensi `zip` di **Select PHP Version →
 Extensions**.
 
-## Token sekali pakai — penting
+## Autentikasi: tanda tangan HMAC
 
-Token **habis setelah satu deploy sukses**. Deploy berikutnya akan gagal di
-preflight dengan pesan 403 dari server. Jadi setiap kali mau deploy:
+Setiap request membawa tiga header:
 
-```bash
-php ~/followtheline.id/jejaka500/api/public/deploy-token.php
-```
+| Header | Isi |
+|---|---|
+| `X-Deploy-Timestamp` | detik Unix saat request dibuat |
+| `X-Deploy-Nonce` | 16 byte acak, sekali pakai |
+| `X-Deploy-Signature` | `hex(hmac_sha256(secret, "timestamp:nonce:archive_sha256"))` |
 
-lalu perbarui secret `CPANEL_DEPLOY_TOKEN`.
+Server memeriksa dengan urutan:
 
-Ini memang disengaja: kalau token bocor, penyerang hanya bisa memakai sisa satu
-deploy, dan itupun harus melewati validasi arsip. Otomatisasi pembuatan token
-per-run adalah pekerjaan lanjutan (butuh pemanggilan dari server, bukan dari
-GitHub).
+1. Secret ada dan tidak kosong → selain itu `403`.
+2. Timestamp berupa angka dan berada dalam **±600 detik** dari jam server.
+3. Tanda tangan cocok (`hash_equals`, constant-time).
+4. Nonce belum pernah dipakai — penanda disimpan di
+   `storage/framework/deploy-nonces/`, dibersihkan otomatis setelah 2× jendela.
+
+**Secret tidak pernah dikirim lewat jaringan.** Yang melintas hanya tanda
+tangganya, yang tidak berguna tanpa secret.
+
+### Kenapa tidak lagi butuh langkah manual
+
+Secret dibuat **sekali**. Setiap deploy berikutnya ditandatangani otomatis oleh
+workflow, jadi tidak ada lagi "buat token baru tiap deploy".
+
+### Yang tetap membatasi kerusakan
+
+- Tanda tangan hanya berlaku dalam jendela 10 menit.
+- Nonce mencegah replay di dalam jendela itu.
+- Tanda tangan terikat ke hash arsip, jadi isi tidak bisa diganti di tengah jalan.
+- Kalau secret bocor: jalankan ulang `deploy-secret.php` (setelah menghapus
+  `storage/framework/deploy-secret.txt`) untuk rotasi, lalu perbarui secret
+  GitHub. Server langsung menolak tanda tangan lama.
 
 ## Deploy manual
 
@@ -131,10 +155,14 @@ gh workflow run deploy-cpanel.yml -R imamkoo/jejaka500 --ref main
 
 | Gejala | Arti |
 |---|---|
-| Preflight gagal di awal run | secret `CPANEL_DEPLOY_TOKEN` belum diisi sama sekali |
-| `403 Forbidden` dari endpoint | token belum dibuat di server, atau sudah terpakai — ulangi langkah 3 |
+| Preflight gagal di awal run | secret `CPANEL_DEPLOY_SECRET` belum diisi sama sekali |
+| Job deploy `skipped` | variable `CPANEL_DEPLOY_READY` belum `true` — langkah 3b |
+| `403 Forbidden` dari endpoint | lihat `[deploy-extract] auth ditolak: …` di error log PHP (alasannya spesifik) |
+| `403` dengan alasan `expired` | selisih jam server > 10 menit, atau run diulang dari run lama |
+| `403` dengan alasan `replayed nonce` | request yang sama dikirim dua kali; jalankan ulang deploy |
+| `403` dengan alasan `bad signature` | secret GitHub ≠ `storage/framework/deploy-secret.txt` |
 | `413` pada potongan | `upload_max_filesize`/`post_max_size` masih kecil — langkah 4 |
-| `422 Archive checksum mismatch` | potongan rusak saat transit; ulangi run (token belum terpakai) |
+| `422 Archive checksum mismatch` | potongan rusak saat transit; jalankan ulang deploy |
 | `500 Cannot create directory` | izin direktori di app root; periksa owner lewat Terminal |
 | Smoke test gagal setelah ekstrak sukses | mapping direktori atau routing, bukan kredensial |
 

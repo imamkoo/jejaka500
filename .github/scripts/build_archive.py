@@ -40,7 +40,7 @@ def EXCLUDED_FROM_ARCHIVE(path: PurePosixPath) -> bool:
         return True
     if path == PurePosixPath("public/deploy-extract.php"):
         return True
-    if path == PurePosixPath("public/deploy-token.php"):
+    if path == PurePosixPath("public/deploy-secret.php"):
         return True
     if (
         name == "config.php"
