@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\District;
 use App\Models\Registration;
 use App\Services\Midtrans\SnapTokenService;
 use Illuminate\Support\Facades\Http;
@@ -12,21 +13,23 @@ use Illuminate\Support\Facades\Http;
  */
 function makePendingRegistration(): Registration
 {
-    return Registration::query()->create([
-        'batch_id' => null,
-        'district_id' => null,
-        'education_level' => 'UMUM',
-        'institution_type' => 'UMUM',
+    $district = District::query()->create([
+        'name' => 'Gambir',
+        'code' => '310003',
+    ]);
+
+    $response = test()->postJson('/api/register', [
+        'district_id' => $district->id,
+        'education_level' => 'SMA',
+        'edition' => 'reguler',
         'name' => 'Uji Callback',
         'phone_number' => '6281234567890',
-        'school_name' => 'TEST',
-        'registration_code' => 'TEST-CB-'.strtoupper(substr(md5((string) mt_rand()), 0, 6)),
-        'page_number' => 1,
-        'edition' => 'reguler',
-        'base_price' => 20000,
-        'total_payment' => 20000,
-        'payment_status' => 'pending',
-    ]);
+        'school_name' => 'SMAN 1 Jakarta',
+    ])->assertCreated();
+
+    return Registration::query()
+        ->where('registration_code', $response->json('data.registration_code'))
+        ->firstOrFail();
 }
 
 it('sends callbacks.notification_url and callbacks.finish in the Snap payload', function () {
@@ -39,9 +42,7 @@ it('sends callbacks.notification_url and callbacks.finish in the Snap payload', 
         '*/snap/v1/transactions' => Http::response(['token' => 'snap-token-cb'], 200),
     ]);
 
-    $registration = makePendingRegistration();
-
-    (new SnapTokenService)->createTokenForRegistration($registration);
+    (new SnapTokenService)->createTokenForRegistration(makePendingRegistration());
 
     Http::assertSent(function ($request) {
         $callbacks = $request->data()['callbacks'] ?? null;
