@@ -51,12 +51,17 @@ MIDTRANS_CLIENT_KEY=<sandbox-client-key>
 MIDTRANS_SERVER_KEY=<sandbox-server-key>
 MIDTRANS_IS_PRODUCTION=false
 MIDTRANS_SSL_VERIFY=true
+MIDTRANS_NOTIFICATION_URL=<public-base-url>/api/midtrans/notification
+MIDTRANS_FINISH_REDIRECT_URL=<frontend-base-url>/booking/finished
 ```
 
 Poin penting:
 
 - `APP_URL` harus domain bawaan Deepnote yang benar.
 - `MIDTRANS_IS_PRODUCTION=false` wajib agar tetap sandbox.
+- `MIDTRANS_NOTIFICATION_URL` wajib diisi. Snap API tidak membaca Notification URL dari
+  dashboard Midtrans; tanpa nilai ini Midtrans mengirim notifikasi ke endpoint default
+  miliknya sendiri sehingga `payment_status` tidak pernah berubah.
 - Kalau frontend memakai preview domain yang berubah-ubah, isi `CORS_ALLOWED_ORIGINS_PATTERNS` dengan regex yang sesuai.
 
 ## 3. Bootstrap aplikasi

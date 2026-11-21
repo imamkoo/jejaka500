@@ -64,6 +64,10 @@ MIDTRANS_MERCHANT_ID=
 MIDTRANS_CLIENT_KEY=
 MIDTRANS_SERVER_KEY=
 MIDTRANS_IS_PRODUCTION=false
+# Wajib: tanpa ini Snap API mengirim notifikasi ke endpoint default Midtrans,
+# bukan ke backend ini (terukur 2026-11-21 pada akun Sandbox JEJAKA500).
+MIDTRANS_NOTIFICATION_URL=https://jejaka500.followtheline.id/api/midtrans/notification
+MIDTRANS_FINISH_REDIRECT_URL=https://jejaka500.followtheline.id/booking/finished
 GREEN_API_URL=
 GREEN_API_ID_INSTANCE=
 GREEN_API_TOKEN_INSTANCE=

@@ -95,8 +95,39 @@ final class SnapTokenService implements CreatesSnapPaymentToken
             Sanitizer::jsonRequest($params);
         }
 
+        $callbacks = $this->buildCallbacks();
+        if ($callbacks !== []) {
+            $params['callbacks'] = $callbacks;
+        }
+
         /** @var array<string, mixed> */
         return array_replace_recursive($creditCardDefaults, $params);
+    }
+
+    /**
+     * `callbacks` menentukan ke mana Midtrans mengirim notifikasi untuk transaksi
+     * Snap yang dibuat lewat API. Tanpa `callbacks.notification_url`, Midtrans
+     * memakai endpoint default miliknya sehingga backend tidak pernah menerima
+     * webhook (terukur 2026-11-21: notifikasi dikirim ke
+     * `app.sandbox.midtrans.com/snap/v1/notification`).
+     *
+     * @return array<string, string>
+     */
+    private function buildCallbacks(): array
+    {
+        $callbacks = [];
+
+        $finish = trim((string) config('midtrans.finish_redirect_url'));
+        if ($finish !== '') {
+            $callbacks['finish'] = $finish;
+        }
+
+        $notification = trim((string) config('midtrans.notification_url'));
+        if ($notification !== '') {
+            $callbacks['notification'] = $notification;
+        }
+
+        return $callbacks;
     }
 
     private function firstName(string $fullName): string
