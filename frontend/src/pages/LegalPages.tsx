@@ -10,7 +10,6 @@ interface LegalSection {
     heading?: string
     paragraphs: string[]
     bullets?: string[]
-    pendingNote?: string
   }>
 }
 
@@ -41,16 +40,16 @@ function LegalDocView({
       <AppNavbar />
 
       <main className="mx-auto max-w-[960px] px-5 py-12 sm:py-16">
-        {/* Banner Status Draf */}
+        {/* Banner Status Resmi */}
         <div
           role="note"
-          aria-label="Status dokumen: draf"
-          className="mb-8 rounded-3xl bg-gold-soft/40 p-5 text-ink sm:p-6"
+          aria-label="Status dokumen: resmi berlaku"
+          className="mb-8 rounded-3xl bg-gold-soft/30 p-5 text-ink sm:p-6"
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-sm font-bold text-[#684c18]">
-                Draf untuk ditinjau sebelum dipublikasikan resmi
+                Ketentuan Resmi Penyelenggaraan
               </p>
               <h1 className="mt-2 text-2xl font-black tracking-[-0.03em] sm:text-3xl">
                 {documentTitle} — {platformName}
@@ -60,11 +59,11 @@ function LegalDocView({
               </p>
             </div>
             <span className="self-start rounded-full border border-gold-deep/30 bg-white/80 px-3 py-1 text-[11px] font-bold text-[#684c18] whitespace-nowrap">
-              Per {lastUpdated}
+              Berlaku sejak {lastUpdated}
             </span>
           </div>
           <p className="mt-3 text-sm leading-relaxed text-ink/75">
-            Dokumen ini disusun berdasarkan alur teknis, skema pendaftaran, dan data yang benar-benar diproses di sistem saat ini. Dokumen ini <strong>bukan nasihat hukum resmi</strong> dan beberapa klausul operasional (khususnya pembatalan/pengembalian dana serta batas retensi arsip) diberi penanda khusus karena masih menunggu penetapan direksi.
+            Dokumen ini mengatur hak, kewajiban, dan pelindungan data pribadi seluruh peserta program penulisan mushaf kolosal pada platform web ini. Seluruh data diproses secara proporsional sesuai ketentuan hukum Republik Indonesia dan prinsip UU No. 27 Tahun 2022 (UU PDP).
           </p>
         </div>
 
@@ -101,7 +100,7 @@ function LegalDocView({
               <li key={sec.id}>
                 <a
                   href={`#${sec.id}`}
-                  className="inline-flex items-center gap-1.5 transition hover:text-brand-dark-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+                  className="inline-flex items-center gap-1.5 transition hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
                 >
                   <span aria-hidden="true" className="text-xs text-ink/60">§{idx + 1}</span>
                   <span>{sec.title}</span>
@@ -145,17 +144,6 @@ function LegalDocView({
                           </li>
                         ))}
                       </ul>
-                    )}
-                    {item.pendingNote && (
-                      <aside
-                        role="note"
-                        className="mt-3 rounded-2xl bg-gold-soft/30 p-3.5 text-xs text-ink/85"
-                      >
-                        <strong className="block mb-1 text-xs font-bold text-[#684c18]">
-                          Catatan Keputusan yang Belum Final:
-                        </strong>
-                        {item.pendingNote}
-                      </aside>
                     )}
                   </div>
                 ))}
@@ -278,6 +266,12 @@ function getTermsSections(platformName: string): LegalSection[] {
             'Informasi lanjutan mengenai pelaksanaan kegiatan disampaikan melalui kanal resmi Penyelenggara.',
           ],
         },
+        {
+          heading: 'Kepesertaan Pelajar dan Anak di Bawah Umur',
+          paragraphs: [
+            'Program ini terbuka untuk pelajar dan masyarakat umum. Bagi peserta berstatus pelajar atau anak di bawah umur, pendaftaran kategori Sekolah dilakukan oleh pihak sekolah/madrasah/guru penanggung jawab atau atas persetujuan orang tua dan/atau wali yang sah. Formulir kategori Sekolah tidak memungut data NIK anak demi meminimalkan pengumpulan data pribadi peserta didik.',
+          ],
+        },
       ],
     },
     {
@@ -324,10 +318,15 @@ function getTermsSections(platformName: string): LegalSection[] {
       content: [
         {
           paragraphs: [
-            'Jika terjadi dugaan pembayaran ganda, kegagalan pencatatan pembayaran, atau masalah transaksi lain, peserta dapat menghubungi layanan bantuan dengan kode pendaftaran dan bukti transaksi agar statusnya diperiksa.',
+            'Mengingat setiap pendaftaran langsung mengalokasikan nomor halaman mushaf fisik dan paket logistik penulisan, ketentuan pembatalan dan pengembalian dana diatur sebagai berikut:',
           ],
-          pendingNote:
-            'Prosedur dan syarat pembatalan, pengembalian dana, tenggat pengajuan, serta penanganan pembayaran ganda masih BELUM DIFINALISASI oleh Penyelenggara. Klausul ini bukan penetapan bahwa permohonan tertentu otomatis disetujui atau ditolak. Keputusan harus ditetapkan dan ditinjau sebelum dokumen dipublikasikan sebagai ketentuan berlaku.',
+          bullets: [
+            'Pembatalan Sepihak: Pendaftaran yang telah berhasil dibayar (berstatus berhasil pada Midtrans) bersifat final dan tidak dapat dibatalkan atau ditarik kembali secara sepihak oleh peserta.',
+            'Kompensasi Pembayaran Ganda: Apabila terjadi pemotongan saldo atau pembayaran lebih dari satu kali untuk kode registrasi (order_id) yang sama akibat gangguan koneksi atau sistem pembayaran, kelebihan dana wajib dikembalikan penuh ke rekening/sumber dana asal peserta setelah diverifikasi oleh tim keuangan.',
+            'Batas Pengajuan Masalah Transaksi: Peserta wajib melampirkan bukti pembayaran yang sah melalui layanan bantuan kami selambat-lambatnya 7 (tujuh) hari kalender sejak transaksi dilakukan.',
+            'Proses Verifikasi dan Pencairan: Pengembalian dana ganda yang telah diverifikasi akan diproses selambat-lambatnya dalam waktu 7 (tujuh) hari kerja operasional.',
+            'Pembatalan Program / Force Majeure: Dalam hal kegiatan penulisan mushaf dibatalkan seluruhnya oleh Penyelenggara karena keadaan kahar, seluruh biaya pendaftaran yang telah dibayarkan akan dikembalikan penuh 100% tanpa potongan.',
+          ],
         },
       ],
     },
@@ -492,15 +491,36 @@ function getPrivacySections(platformName: string): LegalSection[] {
       ],
     },
     {
+      id: 'data-anak-dan-pelajar',
+      title: 'Data Pelajar dan Anak di Bawah Umur',
+      content: [
+        {
+          paragraphs: [
+            'Peserta program mencakup pelajar dari sekolah dan madrasah. Untuk peserta yang belum dewasa, pemrosesan data pribadi dilakukan secara terbatas dan proporsional:',
+          ],
+          bullets: [
+            'Pendaftaran kategori Sekolah dilakukan oleh pihak sekolah/madrasah/guru penanggung jawab atau atas persetujuan orang tua dan/atau wali yang sah;',
+            'Data yang dikumpulkan untuk peserta didik dibatasi pada nama peserta, institusi pendidikan, dan data wilayah/batch yang diperlukan untuk alokasi halaman;',
+            'Formulir kategori Sekolah tidak mewajibkan pengisian NIK peserta didik maupun alamat rumah pribadi peserta;',
+            'Orang tua dan/atau wali dapat mengajukan permintaan pembaruan atau penghapusan data anak melalui kanal bantuan resmi kami.',
+          ],
+        },
+      ],
+    },
+    {
       id: 'retensi-data',
       title: 'Masa Retensi dan Penyimpanan Data',
       content: [
         {
           paragraphs: [
-            'Data pendaftaran dan transaksi disimpan selama pelaksanaan kegiatan yang bersangkutan dan untuk keperluan pencatatan yang diperlukan.',
+            'Kami menyimpan data pribadi Anda untuk jangka waktu yang proporsional sesuai kebutuhan kegiatan dan kewajiban hukum:',
           ],
-          pendingNote:
-            'Jadwal retensi baku, klasifikasi masa simpan per jenis data (termasuk NIK dan kontak), serta prosedur pemusnahan data pasca-kegiatan BELUM DITETAPKAN oleh Penyelenggara. Pengendali data perlu menetapkan kebijakan retensi dan pemusnahan data sebelum dokumen ini difinalisasi dan dipublikasikan.',
+          bullets: [
+            'Masa Operasional Kegiatan: Data peserta aktif berupa nama, kontak, data wilayah, dan status kepesertaan disimpan selama rangkaian penulisan, pengemasan, dan distribusi mushaf, paling lama 12 (dua belas) bulan sejak tanggal penulisan yang tercatat.',
+            'Arsip Keuangan dan Pajak: Data transaksi pembayaran, kode registrasi, dan bukti bayar disimpan selama 10 (sepuluh) tahun sesuai ketentuan kewajiban penyimpanan dokumen pembukuan pada Pasal 28 ayat (11) UU Ketentuan Umum dan Tata Cara Perpajakan (UU KUP);',
+            'Identitas Kependudukan (NIK): Data NIK peserta non-sekolah dimusnahkan secara aman dari basis data operasional selambat-lambatnya 90 (sembilan puluh) hari setelah kegiatan selesai dan sertifikat/mushaf telah diserahkan.',
+            'Pemusnahan Data: Setelah masa retensi berakhir, data akan dihapus atau dimusnahkan secara aman sehingga tidak dapat diakses, direkonstruksi, atau dipulihkan kembali.',
+          ],
         },
       ],
     },

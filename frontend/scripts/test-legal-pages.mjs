@@ -16,11 +16,17 @@ test('home footer links to both legal pages', () => {
   assert.match(home, /to="\/privacy"/)
 })
 
-test('both legal pages clearly remain drafts pending legal and product decisions', () => {
-  assert.match(legal, /Draf untuk ditinjau/i)
-  assert.match(legal, /BELUM DIFINALISASI/)
-  assert.match(legal, /BELUM DITETAPKAN/)
+test('both legal pages state the operative policy set', () => {
+  assert.match(legal, /Berlaku sejak/)
+  assert.match(legal, /7 \(tujuh\) hari kerja/)
+  assert.match(legal, /90 \(sembilan puluh\) hari/)
+  assert.match(legal, /10 \(sepuluh\) tahun/)
+  assert.match(legal, /UU KUP/)
+  assert.match(legal, /orang tua dan\/atau wali/)
   assert.match(legal, /PT PANDU IBU PERTIWI/)
   assert.match(legal, /NIK/)
   assert.match(legal, /Midtrans/)
+  assert.doesNotMatch(legal, /BELUM DIFINALISASI/)
+  assert.doesNotMatch(legal, /BELUM DITETAPKAN/)
+  assert.doesNotMatch(legal, /Draf untuk ditinjau/i)
 })
