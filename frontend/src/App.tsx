@@ -5,6 +5,13 @@ import { PwaUpdatePrompt } from './components/PwaUpdatePrompt'
 import { ScrollProgress } from './components/motion/ScrollProgress'
 import { HomePage } from './pages/HomePage'
 
+const TermsPage = lazy(() =>
+  import('./pages/LegalPages').then((module) => ({ default: module.TermsPage })),
+)
+const PrivacyPage = lazy(() =>
+  import('./pages/LegalPages').then((module) => ({ default: module.PrivacyPage })),
+)
+
 const BookingPage = lazy(() =>
   import('./pages/BookingPage').then((module) => ({ default: module.BookingPage })),
 )
@@ -93,6 +100,8 @@ function App() {
             <Route path="/batches/full" element={<BatchFullPage />} />
             <Route path="/batches/closed" element={<BatchClosedPage />} />
             <Route path="/batches/:slug" element={<BatchDetailsPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
