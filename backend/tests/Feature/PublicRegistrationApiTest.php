@@ -586,7 +586,7 @@ it('generates VIP smart code using the registrant district and level', function 
     $response = postVipWithDocs($district, 'SMA', '6281000000060')->assertCreated();
 
     expect($response->json('data.registration_code'))
-        ->toMatch('/^3174070-VIP-SMA-MUSHAFV\d+-\d{3}-[A-Z0-9]+-[A-Z0-9]{4}$/');
+        ->toMatch('/^J500-3174070-VIP-SMA-MUSHAFV\d+-\d{3}-[A-Z0-9]+-[A-Z0-9]{4}$/');
 });
 
 it('generates Reguler smart code using the registrant district and level', function () {
@@ -595,7 +595,7 @@ it('generates Reguler smart code using the registrant district and level', funct
     $response = postReg($district, 'SMP', 'SMPN 1 Cilandak', '6281000000070')->assertCreated();
 
     expect($response->json('data.registration_code'))
-        ->toMatch('/^3171030-REGULER-SMP-MUSHAF\d+-\d{3}-[A-Z0-9]+-[A-Z0-9]{4}$/');
+        ->toMatch('/^J500-3171030-REGULER-SMP-MUSHAF\d+-\d{3}-[A-Z0-9]+-[A-Z0-9]{4}$/');
 });
 
 it('uses the registrant district even when the batch was anchored elsewhere (kota extension)', function () {
@@ -605,7 +605,7 @@ it('uses the registrant district even when the batch was anchored elsewhere (kot
     postReg($cilandak, 'SMP', 'SMPN 1 Cilandak', '6281000000080')->assertCreated();
     $response = postReg($pasarMinggu, 'SMP', 'SMPN 99 Pasar Minggu', '6281000000081')->assertCreated();
 
-    expect($response->json('data.registration_code'))->toStartWith('3171040-REGULER-SMP-');
+    expect($response->json('data.registration_code'))->toStartWith('J500-3171040-REGULER-SMP-');
 });
 
 /*

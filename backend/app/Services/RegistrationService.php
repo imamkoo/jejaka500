@@ -17,6 +17,17 @@ class RegistrationService
 {
     public const BATCH_CAPACITY = 603;
 
+    /**
+     * Prefix produk pada Smart Code / `order_id` Midtrans.
+     *
+     * JEJAKA500 dan GEMMA449 akan berbagi satu akun Midtrans (satu PT), dan Midtrans
+     * menyimpan riwayat `order_id` secara global — bukan per produk. Prefix ini
+     * memberi namespace eksplisit sehingga kode pendaftaran kedua platform tidak
+     * pernah bisa bertabrakan, tanpa bergantung pada fakta bahwa kode wilayah BPS
+     * DKI (`31*`) dan Jawa Barat (`32*`) memang berbeda.
+     */
+    public const ORDER_CODE_PREFIX = 'J500';
+
     public const KAMPUNG_EDITION = 'kampung';
 
     /**
@@ -84,7 +95,8 @@ class RegistrationService
             $editionCode = strtoupper($edition);
 
             $smartCode = sprintf(
-                '%s-%s-%s-MUSHAF%s-%03d-%s-%s',
+                '%s-%s-%s-%s-MUSHAF%s-%03d-%s-%s',
+                self::ORDER_CODE_PREFIX,
                 $registrantDistrict->code,
                 $editionCode,
                 $level,
