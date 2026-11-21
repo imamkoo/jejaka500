@@ -173,7 +173,7 @@ it('builds smart codes from registrant district and level even on kota extension
         'school_name' => 'SMPN 99 Pasar Minggu',
     ]);
 
-    expect($extension->registration_code)->toStartWith('3171040-REGULER-SMP-');
+    expect($extension->registration_code)->toStartWith('J500-3171040-REGULER-SMP-');
 });
 
 it('marks the batch as full once capacity is reached', function () {
@@ -425,7 +425,7 @@ it('groups Mushaf Kampung registrations into a per-district kampung batch', func
         ->and($batch->name)->toBe('Mushaf Kampung Cilandak 1')
         ->and((int) $first->base_price)->toBe(20000)
         ->and($second->page_number)->toBe(2)
-        ->and($first->registration_code)->toStartWith('3171030-KAMPUNG-SD-MUSHAFK1-001-');
+        ->and($first->registration_code)->toStartWith('J500-3171030-KAMPUNG-SD-MUSHAFK1-001-');
 });
 
 it('fills a kampung fallback when the school name key is absent', function () {
